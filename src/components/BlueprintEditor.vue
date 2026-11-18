@@ -181,6 +181,8 @@ interface Built {
 	bvh: ReturnType<typeof buildBVH>;
 	transforms: Matrix4[][];
 	bounds: Vector3[];
+	/** 有编辑命令分发了图标/物流站更新事件，下一帧通知图层 dataChanged */
+	edited: { pending: boolean };
 }
 
 const b = computed<Built | null>(() => {
@@ -197,16 +199,21 @@ const b = computed<Built | null>(() => {
 		layerRoot.name = entry.id;
 		group.add(layerRoot);
 		layer.build({
-			root: layerRoot, renderer, R, data: d, buildings: d.buildings, transforms,
+			root: layerRoot, renderer, camera, R, data: d, buildings: d.buildings, transforms,
 			// 传原始对象：build 里读取显示状态不应让这个 computed 依赖它
 			icons: badges.icons, iconTexture: badges.iconTexture, view: toRaw(view),
 		});
 		return { entry, layer };
 	});
 	group.add(badges.group);
-	registerIconUpdater(commandQueue.value.updater, badges, R, pos);
+	const updater = commandQueue.value.updater;
+	registerIconUpdater(updater, badges, R, pos);
+	// 合并进上一条的命令不会增加 execVersion，所以直接听更新事件；一帧内的多个事件合并成一次
+	const edited = { pending: false };
+	for (const e of [updater.updateBuildingIcon, updater.updateBeltIcon, updater.updateSorterIcon, updater.updateStationInfo])
+		e.on(() => { edited.pending = true; });
 	return {
-		root: group, layers, badges, transforms,
+		root: group, layers, badges, transforms, edited,
 		bvh: buildBVH(transforms, d.buildings),
 		bounds: blueprintBoundsPoints(d.buildings, transforms),
 	};
@@ -505,13 +512,21 @@ onMounted(() => {
 			if (frameOnBuild)
 				frameOnBuild = !frameBlueprint();
 			applyVisibility(built);
-			for (const { layer } of built.layers)
-				layer.update(dt);
+			if (built.edited.pending) {
+				built.edited.pending = false;
+				for (const { layer } of built.layers)
+					layer.dataChanged?.();
+			}
 		}
 		applyHover();
 		selection.update(dt, reducedMotion.value);
 
 		const { changed, pose } = rig!.update(dt);
+		// 图层按这一帧的相机位姿分配 LOD、剔除重叠标记
+		if (built) {
+			for (const { layer } of built.layers)
+				layer.update(dt);
+		}
 		// 天光朝注视点的法线，太阳从相机一侧（东南）斜照，朝向相机的面才亮
 		hemiLight.position.copy(pose.normal);
 		sunTarget.position.copy(pose.target);

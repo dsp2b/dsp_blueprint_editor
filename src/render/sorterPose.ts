@@ -1,4 +1,5 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
+import { GLTF_TO_LOCAL } from './core/materials';
 
 /**
  * 分拣器姿态（纯函数，只依赖 three）。
@@ -13,7 +14,7 @@ import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
  */
 
 /** 连着建筑时，顶梁从端点向分拣器内侧缩进的距离（米，来自游戏 InserterRenderer） */
-export const TOP_REACH = 1.03;
+const TOP_REACH = 1.03;
 /** 模型里烘焙的默认姿态：A=(0,0,0) B=(0,0,2)，t1=t2=1，此时的 ATop / BTop（glTF 坐标，A 端原点） */
 const BAKED_A_TOP = new Vector3(0, 1, TOP_REACH);
 const BAKED_B_TOP = new Vector3(0, 1, 2 - TOP_REACH);
@@ -22,17 +23,6 @@ export const PARKED_PHASE = 0.25;
 /** 游戏每个 tick 给动画时间加 10000（满电），一个 tick 1/60 秒 */
 const TIME_PER_TICK = 10000;
 const TICKS_PER_SECOND = 60;
-
-/**
- * glTF 模型空间 → 建筑本地空间：本地 (x, y, z) = glTF (−x, z, y)。
- * 与 real/buildings.ts 的 GLTF_TO_LOCAL 相同（那里依赖加载器，纯模块不能引用）。
- */
-export const GLTF_TO_LOCAL = new Matrix4().set(
-    -1, 0, 0, 0,
-    0, 0, 1, 0,
-    0, 1, 0, 0,
-    0, 0, 0, 1,
-);
 
 const AXIS_Z = new Vector3(0, 0, 1);
 const euler = new Euler();
@@ -85,7 +75,7 @@ export function grabberS(phase: number) {
 }
 
 /** 相位在 A→B 途中（抓手带着货物）时为 true，回程是空的 */
-export function isLoaded(phase: number) {
+function isLoaded(phase: number) {
     const f = phase - Math.floor(phase);
     return f < 0.5;
 }
@@ -120,14 +110,6 @@ export interface SorterShape {
     arrowLength: number;
     /** [A 抬高, ATop, BTop, B 抬高] */
     polyline: [Vector3, Vector3, Vector3, Vector3];
-}
-
-export interface SorterPose extends SorterShape {
-    phase: number;
-    grabberS: number;
-    /** 抓手的世界矩阵（glTF 轴向，位置在折线上，朝向跟 A 端） */
-    grabber: Matrix4;
-    loaded: boolean;
 }
 
 const rotA = new Matrix4();
@@ -173,14 +155,6 @@ export function grabberAt(shape: SorterShape, phase: number, out: Matrix4): bool
     quat.setFromRotationMatrix(rotA.extractRotation(shape.aFrame));
     out.compose(point, quat, ONE);
     return isLoaded(phase);
-}
-
-/** 两端 + 连接状态 + 动画相位 → 各部件的姿态 */
-export function poseSorter(a: Matrix4, b: Matrix4, t1: 0 | 1, t2: 0 | 1, phase: number): SorterPose {
-    const shape = sorterShape(a, b, t1, t2);
-    const grabber = new Matrix4();
-    const loaded = grabberAt(shape, phase, grabber);
-    return { ...shape, phase, grabberS: grabberS(phase), grabber, loaded };
 }
 
 /** 烘焙的顶梁/箭头顶点（glTF 坐标）按所属端（_FRAME）拉伸后的世界位置 */

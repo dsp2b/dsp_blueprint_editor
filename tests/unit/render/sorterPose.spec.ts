@@ -1,8 +1,17 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import {
-    connectsToBuilding, cycleSeconds, endFrame, grabberPhase, grabberS, GLTF_TO_LOCAL, PARKED_PHASE, pointAlong, poseSorter,
+    connectsToBuilding, cycleSeconds, endFrame, grabberAt, grabberPhase, grabberS, PARKED_PHASE, pointAlong,
     sorterShape, stretchVertex,
 } from '@/render/sorterPose';
+import { GLTF_TO_LOCAL } from '@/render/core/materials';
+
+/** 两端 + 连接状态 + 动画相位 → 各部件的姿态（与 RealSorters 写实例时的组合相同） */
+function poseSorter(a: Matrix4, b: Matrix4, t1: 0 | 1, t2: 0 | 1, phase: number) {
+    const shape = sorterShape(a, b, t1, t2);
+    const grabber = new Matrix4();
+    const loaded = grabberAt(shape, phase, grabber);
+    return { ...shape, phase, grabberS: grabberS(phase), grabber, loaded };
+}
 
 /** glTF 坐标（y 向上、z 向前）下的末端：位置 + 绕 y 转 yaw 度 */
 function frame(x: number, y: number, z: number, yawDeg = 0) {

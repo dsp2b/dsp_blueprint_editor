@@ -137,4 +137,36 @@ describe('useBlueprintSession', () => {
             expect(s.loading.value.visible).toBe(false);
         });
     });
+    it('fires opened with a consistent input even if a newer open starts while recents are saved', async () => {
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>(r => { release = r; });
+        const store = memStore();
+        const slowStore = { ...store, add: async (e: RecentInput) => { await gate; await store.add(e); } };
+        const { s } = mk({ store: slowStore } as Partial<SessionDeps>);
+        const seen: string[] = [];
+        s.onOpened(d => seen.push(`${d.header.shortDesc}:${s.input.value}`));
+        const a = s.open('a');
+        await new Promise(r => setTimeout(r, 0)); // a 已解析，正在写最近列表
+        const b = s.open('bad');
+        release();
+        await Promise.all([a, b]);
+        expect(seen).toEqual(['a:a']);
+        expect(s.data.value?.header.shortDesc).toBe('a');
+    });
+    it('aborts the in-flight parse when a newer open or close supersedes it', async () => {
+        const signals: AbortSignal[] = [];
+        const parse = (str: string, o: { signal?: AbortSignal }) => {
+            signals.push(o.signal!);
+            return new Promise<BlueprintData>(() => undefined); // 永不完成
+        };
+        const { s } = mk({ parse } as unknown as Partial<SessionDeps>);
+        void s.open('a');
+        await new Promise(r => setTimeout(r, 0));
+        void s.open('b');
+        await new Promise(r => setTimeout(r, 0));
+        expect(signals[0].aborted).toBe(true);
+        expect(signals[1].aborted).toBe(false);
+        s.close();
+        expect(signals[1].aborted).toBe(true);
+    });
 });

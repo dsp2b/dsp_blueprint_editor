@@ -1,11 +1,12 @@
 import {
-    BufferAttribute, BufferGeometry, DoubleSide, Group, InstancedMesh, Material, Matrix4, Mesh, MeshBasicMaterial,
+    BufferGeometry, DoubleSide, Group, InstancedMesh, Material, Matrix4, Mesh, MeshBasicMaterial,
     MeshStandardMaterial, Quaternion, Vector3,
 } from 'three';
 import { BeltPath, BeltTier, BELT_LIFT } from '../beltPath';
+import { DIM_OPACITY, fadedMaterial, GLTF_TO_LOCAL } from '../core/materials';
+import { MergedParts } from '../core/mergedParts';
 import { TIER_COLORS } from '../core/tiers';
 import type { LayerContext } from '../layers';
-import { GLTF_TO_LOCAL } from './buildings';
 import type { GLTFLike } from './loader';
 
 /** 贴图沿带长一次重复的长度（米）：u = 弧长 / 1.02 */
@@ -15,7 +16,6 @@ const REPEATS_PER_UV_SPEED = 3.529412;
 /** 只有 |v − 0.5| 小于它的中间轨道滚动，两侧边缘不动 */
 const SCROLL_LANE = 0.34;
 const UV_SPEED: Record<BeltTier, number> = { 1: 1, 2: 2, 3: 5 };
-const DIM_OPACITY = 0.3;
 /** 模型到达前的占位条带半宽 */
 const PLACEHOLDER_HALF_WIDTH = 0.4;
 
@@ -145,83 +145,6 @@ export function beltRings(path: BeltPath, nodes: readonly Vector3[]): Ring[] {
     return rings;
 }
 
-/** 按建筑分段的合并几何：高亮时按段把三角形分到"正常 / 淡化"两个 group */
-export class MergedParts {
-    readonly positions: number[] = [];
-    readonly normals: number[] = [];
-    readonly uv0: number[] = [];
-    readonly uv1: number[] = [];
-    readonly indices: number[] = [];
-    readonly parts: { building: number, start: number, count: number }[] = [];
-    private full: Uint32Array | null = null;
-    mesh: Mesh<BufferGeometry, Material[]> | null = null;
-
-    get vertexCount() {
-        return this.positions.length / 3;
-    }
-
-    /** 接下来的三角形属于 building（与上一段同一建筑时并入） */
-    part(building: number) {
-        const last = this.parts[this.parts.length - 1];
-        if (last && last.building === building && last.start + last.count === this.indices.length)
-            return;
-        this.parts.push({ building, start: this.indices.length, count: 0 });
-    }
-
-    tri(a: number, b: number, c: number) {
-        this.indices.push(a, b, c);
-        this.parts[this.parts.length - 1].count += 3;
-    }
-
-    build(material: Material, dim: Material) {
-        const geometry = new BufferGeometry();
-        geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
-        geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
-        if (this.uv0.length)
-            geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uv0), 2));
-        if (this.uv1.length)
-            geometry.setAttribute('uv1', new BufferAttribute(new Float32Array(this.uv1), 2));
-        this.full = new Uint32Array(this.indices);
-        geometry.setIndex(new BufferAttribute(this.full.slice(), 1));
-        geometry.addGroup(0, this.full.length, 0);
-        geometry.computeBoundingSphere();
-        this.mesh = new Mesh(geometry, [material, dim]);
-        return this.mesh;
-    }
-
-    setMask(mask: Uint8Array | null) {
-        if (!this.mesh || !this.full)
-            return;
-        const geometry = this.mesh.geometry;
-        const index = geometry.getIndex()!;
-        const arr = index.array as Uint32Array;
-        geometry.clearGroups();
-        if (mask === null) {
-            arr.set(this.full);
-            geometry.addGroup(0, arr.length, 0);
-        } else {
-            let k = 0;
-            for (const lit of [true, false]) {
-                const from = k;
-                for (const p of this.parts) {
-                    if (Boolean(mask[p.building]) !== lit)
-                        continue;
-                    arr.set(this.full.subarray(p.start, p.start + p.count), k);
-                    k += p.count;
-                }
-                if (k > from)
-                    geometry.addGroup(from, k - from, lit ? 0 : 1);
-            }
-        }
-        index.needsUpdate = true;
-    }
-
-    dispose() {
-        this.mesh?.geometry.dispose();
-        this.mesh = null;
-    }
-}
-
 const right = new Vector3();
 const up = new Vector3();
 const nrm = new Vector3();
@@ -326,13 +249,7 @@ function patchScroll(material: Material, uniforms: ScrollUniform) {
     material.customProgramCacheKey = () => 'belt-scroll';
 }
 
-function dimOf<M extends Material>(m: M) {
-    const d = m.clone() as M;
-    d.transparent = true;
-    d.opacity = DIM_OPACITY;
-    d.depthWrite = false;
-    return d;
-}
+const dimOf = <M extends Material>(m: M) => fadedMaterial(m, DIM_OPACITY);
 
 /** GLB 里名为 name 的节点（或其下第一个网格） */
 function findMesh(gltf: GLTFLike, name: string): Mesh | null {
@@ -524,10 +441,6 @@ export class RealBelts {
     /** 蓝图里出现的等级 */
     tierKeys(): BeltTier[] {
         return [...this.tiers.keys()];
-    }
-
-    shown(tier: BeltTier) {
-        return this.tiers.get(tier)?.real ?? false;
     }
 
     attach(tier: BeltTier, gltf: GLTFLike) {

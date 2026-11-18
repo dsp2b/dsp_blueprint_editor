@@ -38,4 +38,35 @@ describe('recentStore', () => {
         await createRecentStore(f).add(item(1));
         expect((await createRecentStore(f).list()).map(e => e.name)).toEqual(['bp1']);
     });
+    it('retries opening the database after a transient failure', async () => {
+        const real = new IDBFactory();
+        let failNext = true;
+        const flaky = {
+            open: (name: string, v?: number) => {
+                if (!failNext)
+                    return real.open(name, v);
+                failNext = false;
+                const req = { error: new DOMException('busy', 'UnknownError') } as unknown as IDBOpenDBRequest;
+                setTimeout(() => req.onerror?.(new Event('error')), 0);
+                return req;
+            },
+        } as unknown as IDBFactory;
+        const s = createRecentStore(flaky);
+        await expect(s.list()).rejects.toBeTruthy();
+        await s.add(item(1));
+        expect((await s.list()).map(e => e.name)).toEqual(['bp1']);
+    });
+    it('closes its connection when another tab upgrades the database', async () => {
+        const f = new IDBFactory();
+        const s = createRecentStore(f);
+        await s.add(item(1));
+        // 版本升级请求只有在旧连接关闭后才会成功
+        const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = f.open('dsp-blueprint-recent', 2);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+            req.onblocked = () => reject(new Error('blocked by the store connection'));
+        });
+        upgraded.close();
+    });
 });

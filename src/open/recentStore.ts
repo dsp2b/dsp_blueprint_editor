@@ -54,8 +54,20 @@ export function createRecentStore(factory?: IDBFactory): RecentStore {
             const s = req.result.createObjectStore(STORE, { keyPath: 'id' });
             s.createIndex('openedAt', 'openedAt');
         };
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => {
+            const conn = req.result;
+            // 别的标签页升级数据库时让出连接，下次使用再重新打开
+            conn.onversionchange = () => {
+                conn.close();
+                dbPromise = null;
+            };
+            resolve(conn);
+        };
         req.onerror = () => reject(req.error);
+    }).catch(e => {
+        // 打开失败不缓存，下次调用重试
+        dbPromise = null;
+        throw e;
     });
 
     return {
@@ -71,6 +83,8 @@ export function createRecentStore(factory?: IDBFactory): RecentStore {
             const s = t.objectStore(STORE);
             s.put({ ...item, id: codeId(item.code), openedAt: lastStamp });
             const finished = done(t);
+            // 计数或游标先失败时事务也会 abort，避免 finished 的拒绝无人处理
+            finished.catch(() => undefined);
             let extra = (await wrap(s.count())) - RECENT_LIMIT;
             if (extra > 0) {
                 // 只遍历键（不读取大块代码），按 openedAt 升序删除最旧的

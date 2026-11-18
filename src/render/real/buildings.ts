@@ -2,42 +2,20 @@ import { Box3, BufferGeometry, Color, Group, InstancedMesh, Material, Matrix4, M
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
+import { fadedMaterial, GHOST_OPACITY, GLTF_TO_LOCAL, tintFor, WHITE } from '../core/materials';
 import { createBoxesLayer } from '../simple/boxes';
 import type { Layer, LayerContext } from '../layers';
 import type { GLTFLike } from './loader';
 
-/**
- * glTF 模型空间 → 建筑本地空间：本地 (x, y, z) = glTF (−x, z, y)
- * （等价于 rotation.set(π/2, 0, π, 'ZYX')）。建筑本地 z 朝上、y 朝正前方，
- * 与 unitBoxTrans 对游戏模型空间的映射一致，因此不会镜像。
- */
-export const GLTF_TO_LOCAL = new Matrix4().set(
-    -1, 0, 0, 0,
-    0, 0, 1, 0,
-    0, 1, 0, 0,
-    0, 0, 0, 1,
-);
-
 /** 清单没给 LOD 距离时，相机距离小于它的实例用 LOD0 */
 export const DEFAULT_LOD_DISTANCE = 120;
-const GHOST_OPACITY = 0.14;
-const WHITE = new Color(1, 1, 1);
-/** 实例颜色与材质颜色相乘：悬停、选中时偏全息青并提亮 */
-const HOVER_TINT = new Color(1.3, 1.55, 1.75);
-const SELECT_TINT = new Color(1.45, 1.85, 2.3);
 
 /** 模型都画的建筑（传送带、分拣器另行处理） */
 export function isModelBuilding(b: BlueprintBuilding) {
     return !isBelt(b.itemId) && !isInserter(b.itemId) && buildingMeta.has(b.modelIndex);
 }
 
-function ghostOf(m: Material) {
-    const g = m.clone();
-    g.transparent = true;
-    g.opacity = GHOST_OPACITY;
-    g.depthWrite = false;
-    return g;
-}
+const ghostOf = (m: Material) => fadedMaterial(m, GHOST_OPACITY);
 
 interface Part {
     /** 0 为 LOD0，1 为最低一级 */
@@ -219,10 +197,6 @@ export class RealBuildings {
         return this.types.get(modelIndex)?.buildings ?? [];
     }
 
-    shown(modelIndex: number) {
-        return this.types.get(modelIndex)?.model != null;
-    }
-
     /** 某类模型下载完成：换掉它的方盒占位。返回模型最高点高度（建筑本地 z） */
     attach(modelIndex: number, low: GLTFLike, high: GLTFLike | null, lodDistance: number) {
         const t = this.types.get(modelIndex);
@@ -240,13 +214,7 @@ export class RealBuildings {
         return model.top;
     }
 
-    private tintOf = (index: number) => {
-        if (this.selected.has(index))
-            return SELECT_TINT;
-        if (index === this.hovered)
-            return HOVER_TINT;
-        return null;
-    };
+    private tintOf = (index: number) => tintFor(index, this.hovered, this.selected);
 
     private writeType(t: TypeEntry) {
         t.model?.write(this.mask, this.tintOf);

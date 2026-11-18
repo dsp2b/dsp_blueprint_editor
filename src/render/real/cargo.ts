@@ -1,8 +1,10 @@
 import {
     BufferAttribute, BufferGeometry, Color, Group, InstancedBufferAttribute, InstancedMesh, Material, Matrix4,
-    MeshLambertMaterial, Quaternion, SRGBColorSpace, Texture, Vector2, Vector3,
+    MeshLambertMaterial, Quaternion, SRGBColorSpace, Texture, Vector3,
 } from 'three';
 import { BeltTier } from '../beltPath';
+import { DIM_OPACITY, fadedMaterial } from '../core/materials';
+import { patchIconAtlas } from './iconAtlas';
 import type { Ring } from './belts';
 
 /** 游戏每 tick 前进 beltSpeed 个路径点，60 tick/s、点距 0.06 m：1 档速度 = 3.6 m/s */
@@ -13,7 +15,6 @@ export const CARGO_SPACING = 1.2;
 const PLATE_HALF = 0.25;
 const PLATE_HALF_HEIGHT = 0.15;
 const PLATE_BEVEL = 0.06;
-const DIM_OPACITY = 0.3;
 const TOP_COLOR = new Color().setRGB(0.80, 0.85, 0.90, SRGBColorSpace);
 const SIDE_COLOR = new Color().setRGB(0.32, 0.38, 0.46, SRGBColorSpace);
 
@@ -92,34 +93,22 @@ export function cargoPlateGeometry() {
 }
 
 /** 顶面画图集里的物品图标（cargoIcon 为 IconTexture.requestIcon 的下标），其余面为深色 */
-function cargoMaterial(atlas: Texture | null, gridSize: Vector2, dim: boolean) {
-    const m = new MeshLambertMaterial({ color: 0xffffff });
-    if (dim) {
-        m.transparent = true;
-        m.opacity = DIM_OPACITY;
-        m.depthWrite = false;
-    }
-    m.onBeforeCompile = shader => {
-        shader.uniforms.uIcons = { value: atlas };
-        shader.uniforms.uIconGrid = { value: gridSize };
-        shader.uniforms.uTop = { value: TOP_COLOR };
-        shader.uniforms.uSide = { value: SIDE_COLOR };
-        shader.vertexShader = 'attribute float cargoIcon;\nuniform vec2 uIconGrid;\nvarying vec2 vCargoUv;\nvarying vec2 vCargoCell;\n'
-            + shader.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-	vCargoUv = uv;
-	float cargoId = floor(cargoIcon + 0.5);
-	vCargoCell = vec2(mod(cargoId, uIconGrid.x), floor(cargoId / uIconGrid.x));`);
-        shader.fragmentShader = 'uniform sampler2D uIcons;\nuniform vec2 uIconGrid;\nuniform vec3 uTop;\nuniform vec3 uSide;\nvarying vec2 vCargoUv;\nvarying vec2 vCargoCell;\n'
-            + shader.fragmentShader.replace('#include <map_fragment>', `
-	if (vCargoUv.x < 0.0) {
+function cargoMaterial(atlas: Texture | null, dim: boolean) {
+    const m = dim ? fadedMaterial(new MeshLambertMaterial({ color: 0xffffff }), DIM_OPACITY) : new MeshLambertMaterial({ color: 0xffffff });
+    patchIconAtlas(m, {
+        atlas,
+        uniforms: { uTop: TOP_COLOR, uSide: SIDE_COLOR },
+        declarations: 'uniform vec3 uTop;\nuniform vec3 uSide;',
+        fragment: `
+	if (vIconUv.x < 0.0) {
 		diffuseColor.rgb = uSide;
 	} else {
-		vec2 q = (vCargoUv - 0.5) * 1.12 + 0.5;
-		vec4 icon = (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0) ? texture2D(uIcons, (q + vCargoCell) / uIconGrid) : vec4(0.0);
+		vec2 q = (vIconUv - 0.5) * 1.12 + 0.5;
+		vec4 icon = (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0) ? atlasIcon(q) : vec4(0.0);
 		diffuseColor.rgb = mix(uTop, icon.rgb, icon.a);
-	}`);
-    };
-    m.customProgramCacheKey = () => `belt-cargo-${dim ? 1 : 0}`;
+	}`,
+        cacheKey: `belt-cargo-${dim ? 1 : 0}`,
+    });
     return m;
 }
 
@@ -154,7 +143,7 @@ export class RealCargo {
     private mask: Uint8Array | null = null;
     private dirty = true;
 
-    constructor(lanes: CargoLane[], atlas: Texture | null, gridSize: Vector2) {
+    constructor(lanes: CargoLane[], atlas: Texture | null) {
         this.group.name = 'belt-cargo';
         this.lanes = lanes.filter(l => l.rings.length > 1 && l.icons.size > 0)
             .map(l => ({ ...l, length: l.rings[l.rings.length - 1].t, phase: 0 }));
@@ -166,7 +155,7 @@ export class RealCargo {
             const geometry = base.clone();
             const icon = new InstancedBufferAttribute(new Float32Array(capacity), 1);
             geometry.setAttribute('cargoIcon', icon);
-            const material = cargoMaterial(atlas, gridSize, dim);
+            const material = cargoMaterial(atlas, dim);
             const mesh = new InstancedMesh(geometry, material, capacity);
             mesh.frustumCulled = false;
             mesh.name = dim ? 'cargo-ghost' : 'cargo';

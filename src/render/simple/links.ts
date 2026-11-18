@@ -1,16 +1,17 @@
 import {
-    BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Material, Matrix4, Mesh,
+    CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Material, Matrix4,
     MeshBasicMaterial, MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, TubeGeometry, Vector3,
 } from 'three';
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta } from '@/data/building';
 import { isInserter } from '@/data/items';
 import { BeltPath, BeltTier, buildBeltPaths } from '../beltPath';
+import { DIM_OPACITY, fadedMaterial } from '../core/materials';
+import { MergedParts } from '../core/mergedParts';
 import { TIER_COLORS, tierOf } from '../core/tiers';
 import type { Layer, LayerContext } from '../layers';
 
 const FALLBACK = new Color(0xdddddd);
-const DIM_OPACITY = 0.3;
 /** 传送带条带半宽（米） */
 const BELT_HALF_WIDTH = 0.3;
 /** 一个箭头沿带长占的长度（米） */
@@ -46,109 +47,24 @@ function chevronTexture(color: Color) {
     return t;
 }
 
-interface Part {
-    /** 这一段涉及的建筑 index：任一被高亮则整段正常显示 */
-    buildings: number[];
-    start: number;
-    count: number;
-}
-
-/**
- * 多段几何合并成一个网格，靠 geometry group 分成"正常 / 淡化"两种材质：
- * 高亮时把不匹配的段的三角形排到索引末尾，交给半透明、不写深度的材质。
- */
-class MergedParts {
-    readonly positions: number[] = [];
-    readonly normals: number[] = [];
-    readonly uvs: number[] = [];
-    readonly indices: number[] = [];
-    readonly parts: Part[] = [];
-    private full: Uint32Array | null = null;
-    mesh: Mesh<BufferGeometry, Material[]> | null = null;
-
-    begin(buildings: number[]) {
-        this.parts.push({ buildings, start: this.indices.length, count: 0 });
-        return this.positions.length / 3;
-    }
-
-    end() {
-        const p = this.parts[this.parts.length - 1];
-        p.count = this.indices.length - p.start;
-    }
-
-    build(material: Material, dim: Material) {
-        const geometry = new BufferGeometry();
-        geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
-        if (this.normals.length)
-            geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
-        if (this.uvs.length)
-            geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uvs), 2));
-        this.full = new Uint32Array(this.indices);
-        geometry.setIndex(new BufferAttribute(this.full.slice(), 1));
-        geometry.addGroup(0, this.full.length, 0);
-        geometry.computeBoundingSphere();
-        this.mesh = new Mesh(geometry, [material, dim]);
-        return this.mesh;
-    }
-
-    setMask(mask: Uint8Array | null) {
-        if (!this.mesh || !this.full)
-            return;
-        const geometry = this.mesh.geometry;
-        const index = geometry.getIndex()!;
-        const arr = index.array as Uint32Array;
-        geometry.clearGroups();
-        if (mask === null) {
-            arr.set(this.full);
-            geometry.addGroup(0, arr.length, 0);
-        } else {
-            let k = 0;
-            const lit = (p: Part) => p.buildings.some(b => mask[b]);
-            for (const pass of [true, false]) {
-                const from = k;
-                for (const p of this.parts)
-                    if (lit(p) === pass) {
-                        arr.set(this.full.subarray(p.start, p.start + p.count), k);
-                        k += p.count;
-                    }
-                if (k > from)
-                    geometry.addGroup(from, k - from, pass ? 0 : 1);
-            }
-        }
-        index.needsUpdate = true;
-    }
-
-    dispose() {
-        this.mesh?.geometry.dispose();
-        this.mesh = null;
-    }
-}
-
-function dimOf<M extends Material>(m: M) {
-    const d = m.clone() as M;
-    d.transparent = true;
-    d.opacity = DIM_OPACITY;
-    d.depthWrite = false;
-    return d;
-}
-
 const side = new Vector3();
 /** 沿路径的等级色条带；u 为弧长/箭头长度，v 跨宽度 */
 function addStrip(parts: MergedParts, path: BeltPath) {
     if (path.points.length < 2)
         return;
-    const base = parts.begin(path.buildingIndices);
+    const base = parts.vertexCount;
+    parts.part(path.buildingIndices);
     for (const p of path.points) {
         side.set(1, 0, 0).applyQuaternion(p.rot).multiplyScalar(BELT_HALF_WIDTH);
         parts.positions.push(p.pos.x + side.x, p.pos.y + side.y, p.pos.z + side.z);
         parts.positions.push(p.pos.x - side.x, p.pos.y - side.y, p.pos.z - side.z);
-        parts.uvs.push(p.t / ARROW_LENGTH, 0, p.t / ARROW_LENGTH, 1);
+        parts.uv0.push(p.t / ARROW_LENGTH, 0, p.t / ARROW_LENGTH, 1);
     }
     for (let i = 0; i + 1 < path.points.length; i++) {
         const k = base + i * 2;
-        parts.indices.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+        parts.tri(k, k + 1, k + 2);
+        parts.tri(k + 1, k + 3, k + 2);
     }
-    parts.end();
 }
 
 const p0 = new Vector3();
@@ -169,17 +85,23 @@ function addArc(parts: MergedParts, b: BlueprintBuilding, transforms: Matrix4[])
         pts.push(new Vector3().lerpVectors(p0, p1, k).addScaledVector(up, SORTER_BASE + Math.sin(Math.PI * k) * arch));
     }
     const tube = new TubeGeometry(new CatmullRomCurve3(pts), SORTER_SEGMENTS, SORTER_RADIUS, 6);
-    const base = parts.begin([b.index]);
+    const base = parts.vertexCount;
+    parts.part([b.index]);
     parts.positions.push(...(tube.getAttribute('position').array as Float32Array));
     parts.normals.push(...(tube.getAttribute('normal').array as Float32Array));
-    for (const i of Array.from(tube.getIndex()!.array))
-        parts.indices.push(base + i);
-    parts.end();
+    const idx = tube.getIndex()!.array;
+    for (let k = 0; k + 2 < idx.length; k += 3)
+        parts.tri(base + idx[k], base + idx[k + 1], base + idx[k + 2]);
     tube.dispose();
 }
 
-/** 精简模式：传送带为带流向箭头的等级色条带（按游戏 Bezier 路径），分拣器为等级色弧线 */
-export function createLinksLayer(): Layer {
+const dimOf = <M extends Material>(m: M) => fadedMaterial(m, DIM_OPACITY);
+
+/**
+ * 精简模式：传送带为带流向箭头的等级色条带（按游戏 Bezier 路径），分拣器为等级色弧线。
+ * belts 为 false 时只画分拣器弧线（真实模型模式里分拣器模型到达前的占位）。
+ */
+export function createLinksLayer({ belts = true }: { belts?: boolean } = {}): Layer {
     let ctx: LayerContext | null = null;
     const groups: MergedParts[] = [];
     const materials: Material[] = [];
@@ -189,7 +111,7 @@ export function createLinksLayer(): Layer {
     return {
         build(c) {
             ctx = c;
-            const paths = buildBeltPaths(c.data, buildingMeta, c.transforms);
+            const paths = belts ? buildBeltPaths(c.data, buildingMeta, c.transforms) : [];
             const byTier = new Map<BeltTier, BeltPath[]>();
             for (const p of paths) {
                 byTier.set(p.tier, [...byTier.get(p.tier) ?? [], p]);

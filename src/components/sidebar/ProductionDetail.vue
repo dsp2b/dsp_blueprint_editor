@@ -60,6 +60,7 @@ import { computed, inject, nextTick, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { gameEnv } from '@/analysis/gameEnv';
 import { recipeRates } from '@/analysis/materialFlow';
+import { connectionSummary } from '@/analysis/connections';
 import { buildingInfoKey, commandQueueKey, rendererKey } from '@/define';
 import { itemIconId } from '@/data/icons';
 import { itemName } from '@/i18n';
@@ -86,22 +87,9 @@ const info = computed(() => {
     return recipeRates(recipe, worker.speed);
 });
 
-/** 相邻建筑里谁把东西送进来（输入），谁从这里取走（输出） */
 const connections = computed(() => {
     queue.execVersion.value;
-    const b = props.building;
-    const items = new Map<number, number>();
-    let inCount = 0, outCount = 0;
-    for (const n of buildingInfo.adjacency[b.index] ?? []) {
-        if (!n)
-            continue;
-        if (n.outputObjIdx === b.index)
-            inCount++;
-        else
-            outCount++;
-        items.set(n.itemId, (items.get(n.itemId) ?? 0) + 1);
-    }
-    return { inCount, outCount, items: [...items].map(([itemId, count]) => ({ itemId, count })) };
+    return connectionSummary(props.building, buildingInfo.adjacency);
 });
 
 const sameTypeCount = computed(() => {

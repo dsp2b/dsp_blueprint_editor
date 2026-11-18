@@ -38,7 +38,7 @@
                 <ul>
                     <li v-for="r in recent" :key="r.id">
                         <button type="button" :disabled="loading.active" @click="emit('open', r.code)">
-                            <img v-if="iconOf(r)" :src="iconOf(r)" alt="">
+                            <img v-if="icons[r.id]" :src="icons[r.id]" alt="">
                             <span v-else></span>
                             <span class="name">{{ r.name || t('未命名') }}</span>
                             <time :datetime="new Date(r.openedAt).toISOString()">{{ when(r.openedAt) }}</time>
@@ -52,11 +52,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { iconUrl } from '@/data/icons';
 import type { ParseErrorInfo } from '@/open/errorMap';
 import type { RecentEntry } from '@/open/recentStore';
+import { recentIconUrls } from '@/open/recentIcons';
 import OpenError from './OpenError.vue';
 
 const props = defineProps<{
@@ -103,12 +104,13 @@ const onFile = async (e: Event) => {
     el.value = '';
 };
 
-const iconOf = (r: RecentEntry) => {
-    const id = r.icons.find(i => i > 0);
-    if (!id)
-        return '';
-    try { return iconUrl(id); } catch { return ''; }
-};
+// iconUrl 是异步的，解析完再交给 <img>；列表变化时丢弃过期的结果
+const icons = ref<Record<string, string>>({});
+watch(() => props.recent, async list => {
+    const urls = await recentIconUrls(list, iconUrl);
+    if (list === props.recent)
+        icons.value = urls;
+}, { immediate: true });
 
 const when = (ts: number) => {
     const d = new Date(ts), now = new Date();

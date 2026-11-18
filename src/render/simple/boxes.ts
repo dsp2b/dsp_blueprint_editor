@@ -4,6 +4,7 @@ import {
 } from 'three';
 import { buildingMeta } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
+import { fadedMaterial, GHOST_OPACITY } from '../core/materials';
 import { TIER_COLORS, tierOf } from '../core/tiers';
 import type { Layer, LayerContext } from '../layers';
 
@@ -14,7 +15,6 @@ const HOVER_TINT = new Color(0x15384F);
 const SELECT_TINT = new Color(0x1E5577);
 const EDGE_ALPHA = 0.55;
 const EDGE_ALPHA_DIM = 0.08;
-const GHOST_OPACITY = 0.14;
 const TRIM_HEIGHT = 0.22;
 const TRIM_PAD = 0.12;
 
@@ -89,13 +89,7 @@ class DimmableInstances {
     }
 }
 
-function ghostOf(m: MeshStandardMaterial) {
-    const g = m.clone();
-    g.transparent = true;
-    g.opacity = GHOST_OPACITY;
-    g.depthWrite = false;
-    return g;
-}
+const ghostOf = (m: MeshStandardMaterial) => fadedMaterial(m, GHOST_OPACITY);
 
 /** 选中框（selectUnitBoxTrans）底部的一圈等级色饰条 */
 function trimMatrix(buildingTrans: Matrix4, selectUnitBoxTrans: Matrix4, out: Matrix4) {

@@ -6,8 +6,13 @@ import type { RecentEntry, RecentStore } from './recentStore';
 /** 解析超过该时长才在卡片里显示进度 */
 export const LOADING_DELAY_MS = 300;
 
+export interface ParseOptions extends FromStrOptions {
+    /** 被更新的打开或关闭取代时中止（Worker 解析据此终止 Worker） */
+    signal?: AbortSignal;
+}
+
 export interface SessionDeps {
-    parse: (code: string, options: FromStrOptions) => BlueprintData | Promise<BlueprintData>;
+    parse: (code: string, options: ParseOptions) => BlueprintData | Promise<BlueprintData>;
     store: RecentStore;
     /** 当前支持的游戏版本 */
     supported: string;
@@ -28,6 +33,11 @@ export function useBlueprintSession(deps: SessionDeps) {
     const recent = ref<RecentEntry[]>([]);
     const openedListeners = new Set<(d: BlueprintData) => void>();
     let seq = 0;
+    let inflight: AbortController | null = null;
+    const abortInflight = () => {
+        inflight?.abort();
+        inflight = null;
+    };
 
     const refreshRecent = async () => {
         try {
@@ -46,6 +56,8 @@ export function useBlueprintSession(deps: SessionDeps) {
             return false;
 
         const mine = ++seq;
+        abortInflight();
+        const ac = inflight = new AbortController();
         input.value = code;
         error.value = null;
         loading.value = { active: true, visible: false, done: 0, total: 0 };
@@ -55,6 +67,7 @@ export function useBlueprintSession(deps: SessionDeps) {
         }, LOADING_DELAY_MS);
         try {
             const parsed = await deps.parse(text, {
+                signal: ac.signal,
                 onProgress: (done, total) => {
                     if (mine === seq)
                         loading.value = { ...loading.value, done, total };
@@ -62,9 +75,13 @@ export function useBlueprintSession(deps: SessionDeps) {
             });
             if (mine !== seq)
                 return false;
+            if (inflight === ac)
+                inflight = null;
             data.value = parsed;
             dirty.value = false;
             loading.value = { active: false, visible: false, done: 0, total: 0 };
+            // 在任何 await 之前通知：此刻 data 与 input 一致，之后可能已有新的打开在进行
+            openedListeners.forEach(l => l(parsed));
             try {
                 await deps.store.add({
                     code: text,
@@ -76,11 +93,12 @@ export function useBlueprintSession(deps: SessionDeps) {
                 console.warn('cannot save recent blueprint', e);
             }
             await refreshRecent();
-            openedListeners.forEach(l => l(parsed));
             return true;
         } catch (e) {
             if (mine !== seq)
                 return false;
+            if (inflight === ac)
+                inflight = null;
             console.error(e);
             error.value = mapParseError(e, text, deps.supported);
             loading.value = { active: false, visible: false, done: 0, total: 0 };
@@ -92,6 +110,7 @@ export function useBlueprintSession(deps: SessionDeps) {
 
     const close = () => {
         seq++;
+        abortInflight();
         data.value = null;
         input.value = '';
         error.value = null;

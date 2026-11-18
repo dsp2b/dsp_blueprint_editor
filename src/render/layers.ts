@@ -1,4 +1,4 @@
-import { Group, Matrix4, WebGLRenderer } from 'three';
+import { Camera, Group, Matrix4, WebGLRenderer } from 'three';
 import { BlueprintBuilding, BlueprintData } from '@/blueprint/parser';
 import { DisplayMode } from '@/settings';
 import { IconGeometry } from '@/icons';
@@ -20,6 +20,8 @@ export interface LayerContext {
     /** 图层自己的根节点，渲染器把它加进场景；setVisible 默认切换它 */
     root: Group;
     renderer: WebGLRenderer;
+    /** 渲染用的相机；update 时已是这一帧的位姿 */
+    camera: Camera;
     /** 星球半径 */
     R: number;
     data: BlueprintData;
@@ -38,12 +40,12 @@ export interface LayerContext {
  */
 export interface Layer {
     build(ctx: LayerContext): void;
-    /** dt：距上一帧的秒数 */
+    /** dt：距上一帧的秒数；渲染器在相机更新之后、渲染之前调用 */
     update(dt: number): void;
     dispose(): void;
     setVisible(visible: boolean): void;
-    /** 真实模型图层：已能替代精简图层时为 true；精简图层不需要 */
-    readonly ready?: boolean;
+    /** 编辑命令执行/撤销/重做之后（配方、过滤物品、槽位等可能变了），图标更新事件已分发完 */
+    dataChanged?(): void;
     /** mask[index] 为 1 的建筑正常显示，其余淡化；null 表示取消高亮 */
     setHighlight?(mask: Uint8Array | null): void;
     setHover?(index: number | null): void;
@@ -72,10 +74,10 @@ export interface LayerInstance {
 }
 
 /**
- * 当前模式下各图层是否显示：选真实模型且有真实模型图层就绪时显示真实模型图层，
- * 否则显示精简图层（没有可用的真实模型时两种模式都显示精简）。
+ * 当前模式下各图层是否显示：选真实模型且注册了真实模型图层时显示真实模型图层，否则显示精简图层。
+ * 真实模型图层自己在模型到达前用精简外观占位，所以不需要等它就绪。
  */
 export function layerVisibility(instances: readonly LayerInstance[], mode: DisplayMode): boolean[] {
-    const realReady = mode === 'model' && instances.some(i => i.entry.mode === 'model' && i.layer.ready);
-    return instances.map(i => i.entry.mode === 'model' ? realReady : !realReady);
+    const real = mode === 'model' && instances.some(i => i.entry.mode === 'model');
+    return instances.map(i => i.entry.mode === 'model' ? real : !real);
 }

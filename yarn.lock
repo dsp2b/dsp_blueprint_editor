@@ -4332,7 +4332,7 @@ express@^4.17.3:
 
 fake-indexeddb@^6.2.8:
   version "6.2.8"
-  resolved "https://registry.npmmirror.com/fake-indexeddb/-/fake-indexeddb-6.2.8.tgz#79593572cf4dc670128d439a937956716bfd546d"
+  resolved "https://registry.yarnpkg.com/fake-indexeddb/-/fake-indexeddb-6.2.8.tgz#79593572cf4dc670128d439a937956716bfd546d"
   integrity sha512-mpVW/HLUqwKXJ6F/s0hMgdK1eQfM4ncTHDioNGHWL0WKV3VcZCoZq1NKgboBbAge07aRCO7L48yziKssL59XEQ==
 
 fast-deep-equal@^3.1.1, fast-deep-equal@^3.1.3:

@@ -4,7 +4,6 @@ None of them touch the real game or the network.
 """
 import copy
 import shutil
-import uuid
 from pathlib import Path
 
 from PIL import Image
@@ -149,7 +148,7 @@ def default_protosets():
             {"ID": 300, "Name": "300", "PrefabPath": "Entities/Prefabs/no-slot-config"},
         ]},
         "MIDIProtoSet": {"m_Name": "MIDIProtoSet", "TableName": "MIDI", "dataArray": [
-            {"ID": 1, "Instrument": 1, "PitchRange": 0},
+            {"ID": 1, "Instrument": 1, "PitchRange": [6, 101]},
         ]},
     }
 
@@ -248,16 +247,17 @@ class FakeHost:
             return None
         return {c.name: (c.stat().st_size if c.is_file() else None) for c in p.iterdir()}
 
-    def make_temp_dir(self):
-        d = self.temp_root / f"dsp-extract-{uuid.uuid4().hex}"
+    def make_temp_dir(self, name):
+        d = self.temp_root / name
         d.mkdir()
         self.created.append(d)
-        self.calls.append(("make_temp_dir", str(d)))
+        self.calls.append(("make_temp_dir", name))
         return str(d)
 
-    def remove_temp_dir(self, path):
-        self.calls.append(("remove_temp_dir", path))
-        shutil.rmtree(path)
+    def remove_temp_dir(self, name):
+        # like the real script: removing a dir that was never created is a no-op
+        self.calls.append(("remove_temp_dir", name))
+        shutil.rmtree(self.temp_root / name, ignore_errors=True)
 
     def extract_ranges(self, game_dir, temp_dir, ranges):
         self.calls.append(("extract_ranges", temp_dir, list(ranges)))

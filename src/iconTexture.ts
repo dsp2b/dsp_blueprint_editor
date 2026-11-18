@@ -11,7 +11,9 @@ export class IconTexture {
 
     texture: Texture;
     private iconIds = new Map<number, number>();
-    private loaded = new Array<boolean>(WIDTH * HEIGHT);
+    /** 已开始加载（或已加载）的图集格；加载失败时移除，下次请求重试 */
+    private loaded = new Set<number>();
+    private disposed = false;
     private loader = new TextureLoader();
 
     constructor(private renderer: WebGLRenderer) {
@@ -34,9 +36,12 @@ export class IconTexture {
             this.iconIds.set(i, nextIndex);
             nextIndex++;
         }
+    }
 
-        for (let i = 0; i < this.loaded.length; i++)
-            this.loaded[i] = false;
+    /** 换蓝图时释放图集；之后才到达的图标不再写入（否则会把已释放的贴图重新上传一份） */
+    dispose() {
+        this.disposed = true;
+        this.texture.dispose();
     }
 
     requestIcon(iconId: number) {
@@ -46,17 +51,24 @@ export class IconTexture {
             return 0;
         }
 
-        if (this.loaded[iconId])
+        if (this.loaded.has(index) || this.disposed)
             return index;
-        this.loaded[iconId] = true;
+        this.loaded.add(index);
 
         (async () => {
             const texture = await this.loader.loadAsync(await iconUrl(iconId));
+            if (this.disposed) {
+                texture.dispose();
+                return;
+            }
             const pos = new Vector2(index % WIDTH, Math.floor(index / WIDTH));
             pos.multiplyScalar(ICON_SIZE);
             this.renderer.copyTextureToTexture(pos, texture, this.texture);
             texture.dispose();
-        })();
+        })().catch(e => {
+            this.loaded.delete(index);
+            console.warn(`icon ${iconId} failed to load`, e);
+        });
 
         return index;
     }

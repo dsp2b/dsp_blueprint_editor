@@ -86,12 +86,23 @@ def test_opsctl_host_refuses_to_delete_anything_but_its_temp_dirs(monkeypatch):
     host = OpsctlHost("asset")
     calls = []
     monkeypatch.setattr(host, "_ps", lambda script, what: calls.append(script) or ["@@GONE"])
-    for bad in ("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Dyson Sphere Program", "C:\\Users\\me", "C:\\"):
+    for bad in ("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Dyson Sphere Program", "C:\\Users\\me", "C:\\",
+                "dsp-extract-..\\..\\Documents", "dsp-extract-a/../b", "dsp-extract-' ; rm"):
         with pytest.raises(ExtractError, match="refusing"):
             host.remove_temp_dir(bad)
     assert calls == []
-    host.remove_temp_dir("C:\\Users\\me\\AppData\\Local\\Temp\\dsp-extract-abc")
-    assert len(calls) == 1 and "dsp-extract-abc" in calls[0]
+    host.remove_temp_dir("dsp-extract-abc")
+    assert len(calls) == 1 and "'dsp-extract-abc'" in calls[0] and "GetTempPath" in calls[0]
+
+
+def test_opsctl_host_creates_the_named_temp_dir(monkeypatch):
+    host = OpsctlHost("asset")
+    calls = []
+    monkeypatch.setattr(host, "_ps", lambda script, what: calls.append(script) or ["@@DIR\tC:\\T\\dsp-extract-abc"])
+    assert host.make_temp_dir("dsp-extract-abc") == "C:\\T\\dsp-extract-abc"
+    assert "'dsp-extract-abc'" in calls[0]
+    with pytest.raises(ExtractError, match="refusing"):
+        host.make_temp_dir("..")
 
 
 def test_opsctl_host_parses_listing(monkeypatch):
@@ -110,9 +121,12 @@ def test_opsctl_failure_is_reported(monkeypatch):
     host = OpsctlHost("asset")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 3, b"", b"NEEDS AUTHORIZATION"))
     with pytest.raises(ExtractError, match="NEEDS AUTHORIZATION"):
-        host.make_temp_dir()
+        host.make_temp_dir("dsp-extract-abc")
 
 
 def test_game_paths_are_quoted_for_powershell():
     from tools.extract.source import _ps_literal
     assert _ps_literal("C:/Bob's Games") == "'C:/Bob''s Games'"
+    # PowerShell also ends single-quoted strings on U+2018..U+201B; each must be doubled too
+    for q in "\u2018\u2019\u201a\u201b":
+        assert _ps_literal(f"C:/Bob{q}s") == f"'C:/Bob{q}{q}s'"

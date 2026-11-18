@@ -1,9 +1,8 @@
-import { BufferGeometry, Camera, Mesh, MeshBasicMaterial, Vector2, Vector3 } from 'three';
+import { Vector2, Vector3 } from 'three';
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta, noIconBuildings } from '@/data/building';
 import { isBelt } from '@/data/items';
 import { itemIconId } from '@/data/icons';
-import { IconTexture } from '@/iconTexture';
 import { BeltTier, buildBeltPaths } from '../beltPath';
 import { inferCarriedItems } from '../carriedItems';
 import { buildingIconId } from '../core/badges';
@@ -32,8 +31,6 @@ export interface RealLayer extends Layer {
     readonly progress: LoadProgress;
     /** 重新下载失败的类型（或下载失败的清单） */
     retry(): void;
-    /** 这类建筑已显示真实模型 */
-    modelShown(modelIndex: number): boolean;
 }
 
 /** 相机移动多远后重新按距离分配 LOD */
@@ -145,8 +142,6 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
     let queue: ModelQueue | null = null;
     let manifest: 'idle' | 'loading' | 'failed' | 'ok' = 'idle';
     let pill: ProgressPill | null = null;
-    let camera: Camera | null = null;
-    let probe: Mesh | null = null;
     let mask: Uint8Array | null = null;
     let hovered: number | null = null;
     let selected: ReadonlySet<number> = new Set();
@@ -303,8 +298,31 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             const speed = buildingMeta.get(modelIndex)?.work?.beltSpeed ?? BELT_SPEED[p.tier];
             return { tier: p.tier, rings: rb.rings[i], speed: beltMetersPerSecond(speed), icons };
         });
-        cargo = new RealCargo(lanes, c.iconTexture.texture ?? null, new Vector2(IconTexture.WIDTH, IconTexture.HEIGHT));
+        cargo = new RealCargo(lanes, c.iconTexture.texture ?? null);
+        cargo.setHighlight(mask);
         c.root.add(cargo.group);
+    };
+
+    /** 编辑之后：重新推断带上/抓手上的物品，更新悬浮标记，并重新隐藏被图标更新写回来的顶面图标 */
+    const refreshFromData = () => {
+        if (!ctx || !buildings || !belts)
+            return;
+        const carried = inferCarriedItems(ctx.data);
+        if (cargo) {
+            ctx.root.remove(cargo.group);
+            cargo.dispose();
+            cargo = null;
+        }
+        buildCargo(ctx, belts, carried);
+        sorters?.setCarried(carried);
+        for (const [b, iconId] of badgeIcon) {
+            const now = buildingIconId(b);
+            if (now !== iconId) {
+                badgeIcon.set(b, now);
+                badges?.setIcon(b.index, ctx.iconTexture.requestIcon(now));
+            }
+        }
+        syncTopIcons();
     };
 
     /** 第一次显示时才建立（精简模式完全不付出代价） */
@@ -327,17 +345,13 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         ctx.root.add(sorters.root);
         badges = new FloatingBadges(ctx.iconTexture.texture, ctx.buildings.filter(b => isModelBuilding(b) && !noIconBuildings.has(b.itemId)).length);
         ctx.root.add(badges.mesh);
-        // 图层契约里没有相机：借一个不画任何东西的网格在渲染时拿到相机
-        probe = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
-        probe.frustumCulled = false;
-        probe.onBeforeRender = (_r, _s, cam) => { camera = cam; };
-        ctx.root.add(probe);
         buildings.setHighlight(mask);
         belts.setHighlight(mask);
-        cargo?.setHighlight(mask);
         buildings.setHover(hovered);
         buildings.setSelected(selected);
         sorters.setHighlight(mask);
+        sorters.setHover(hovered);
+        sorters.setSelected(selected);
         if (typeof document !== 'undefined') {
             pill = new ProgressPill(() => layer.retry());
             if (!t)
@@ -346,7 +360,6 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
     };
 
     const layer: RealLayer = {
-        ready: true,
         get progress() {
             return progress();
         },
@@ -356,14 +369,6 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             else
                 queue?.retry();
             updatePill();
-        },
-        modelShown(modelIndex) {
-            const tier = beltKeys.get(modelIndex);
-            if (tier !== undefined)
-                return belts?.shown(tier) ?? false;
-            if (sorters?.shown(modelIndex))
-                return true;
-            return buildings?.shown(modelIndex) ?? false;
         },
         build(c) {
             ctx = c;
@@ -375,20 +380,11 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             belts?.update(dt, ctx.view.flow);
             cargo?.update(dt, ctx.view.flow);
             sorters?.update(dt, ctx.view.flow);
-            // 编辑里改了配方：更新悬浮标记，并重新隐藏被更新回来的顶面图标
-            for (const [b, iconId] of badgeIcon) {
-                const now = buildingIconId(b);
-                if (now === iconId)
-                    continue;
-                badgeIcon.set(b, now);
-                badges?.setIcon(b.index, ctx.iconTexture.requestIcon(now));
-                if (ctx.icons.hasIcon(b))
-                    ctx.icons.updateIconId(b, 0);
-            }
             if (badges)
                 badges.mesh.visible = ctx.view.badges;
-            if (!camera)
-                return;
+            // 渲染器在相机这一帧的位姿确定之后才调用 update
+            const camera = ctx.camera;
+            camera.updateMatrixWorld();
             // 相机移动超过 LOD_STEP 或有新模型到达时才重新分配 LOD
             camPos.setFromMatrixPosition(camera.matrixWorld);
             if (lodAt === null || lodAt.distanceToSquared(camPos) > LOD_STEP * LOD_STEP) {
@@ -409,14 +405,11 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             belts?.dispose();
             cargo?.dispose();
             badges?.dispose();
-            probe?.geometry.dispose();
-            (probe?.material as MeshBasicMaterial | undefined)?.dispose();
-            buildings = sorters = badges = queue = pill = probe = null;
+            buildings = sorters = badges = queue = pill = null;
             belts = null;
             cargo = null;
             beltKeys.clear();
             badgeIcon.clear();
-            camera = null;
             ctx = null;
         },
         setVisible(v) {
@@ -443,11 +436,14 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         setHover(index) {
             hovered = index;
             buildings?.setHover(index);
+            sorters?.setHover(index);
         },
         setSelected(indices) {
             selected = new Set(indices);
             buildings?.setSelected(selected);
+            sorters?.setSelected(selected);
         },
+        dataChanged: refreshFromData,
         modelOf(index) {
             if (ctx && ctx.transforms[index] && (sorters?.has(index) || (belts && isBelt(ctx.buildings[index]?.itemId ?? 0))))
                 return ctx.transforms[index][0].clone();

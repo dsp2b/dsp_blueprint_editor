@@ -1,17 +1,18 @@
 import {
-    BufferAttribute, BufferGeometry, DoubleSide, Group, InstancedBufferAttribute, InstancedMesh, Material, Matrix4, Mesh,
-    MeshBasicMaterial, Texture, Vector2, Vector3,
+    BufferAttribute, BufferGeometry, Color, DoubleSide, Group, InstancedBufferAttribute, InstancedMesh, Material, Matrix4, Mesh,
+    MeshBasicMaterial, Texture, Vector3,
 } from 'three';
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
-import { IconTexture } from '@/iconTexture';
+import { fadedMaterial, GHOST_OPACITY, tintFor, WHITE } from '../core/materials';
+import { MergedParts } from '../core/mergedParts';
 import { createLinksLayer } from '../simple/links';
 import type { Layer, LayerContext } from '../layers';
 import {
     connectsToBuilding, cycleSeconds, endFrame, grabberAt, grabberPhase, PARKED_PHASE, SorterShape, sorterShape, stretchVertex,
 } from '../sorterPose';
-import { MergedParts } from './belts';
+import { patchIconAtlas } from './iconAtlas';
 import type { GLTFLike } from './loader';
 
 /** 分拣器的建筑模型编号 → 等级（Mk.I..Mk.IV 集装分拣器），清单 sorters 段的键是 sorter-mk{等级} */
@@ -19,7 +20,6 @@ export const SORTER_TIER_OF_MODEL: Readonly<Record<number, 1 | 2 | 3 | 4>> = { 4
 /** 清单里没有 inserterSpeed / arrowSpeed 时各等级的值（PrefabDesc.inserterSTT、箭头滚动） */
 const DEFAULT_STT: Record<number, number> = { 1: 200000, 2: 100000, 3: 50000, 4: 30000 };
 const DEFAULT_ARROW_SPEED: Record<number, number> = { 1: 2, 2: 4, 3: 6, 4: 6 };
-const GHOST_OPACITY = 0.14;
 /** 抓手上物品图标贴花的边长与高度（抓手局部坐标，米） */
 const ICON_SIZE = 0.42;
 const ICON_LIFT = -0.015;
@@ -37,13 +37,7 @@ export interface SorterManifestEntry {
 type PartName = 'ACap' | 'ARail' | 'BCap' | 'BRail' | 'grabber' | 'grabberLoaded';
 const PARTS: PartName[] = ['ACap', 'ARail', 'BCap', 'BRail', 'grabber', 'grabberLoaded'];
 
-function ghostOf(m: Material) {
-    const g = m.clone();
-    g.transparent = true;
-    g.opacity = m.opacity * GHOST_OPACITY;
-    g.depthWrite = false;
-    return g;
-}
+const ghostOf = (m: Material) => fadedMaterial(m, GHOST_OPACITY);
 
 /** 一种部件的实例化网格对（正常 / 淡化） */
 class InstPair {
@@ -53,10 +47,17 @@ class InstPair {
     private nMain = 0;
     private nGhost = 0;
 
-    constructor(name: string, geometry: BufferGeometry, material: Material, capacity: number, ghostMaterial: Material | null = ghostOf(material)) {
+    /** tinted：正常那份按实例颜色显示悬停/选中（图标贴花不需要） */
+    constructor(name: string, geometry: BufferGeometry, material: Material, capacity: number,
+        ghostMaterial: Material | null = ghostOf(material), private readonly tinted = true) {
         this.main = new InstancedMesh(geometry, material, capacity);
         this.main.name = name;
         this.main.frustumCulled = false;
+        // 实例颜色在第一次编译前就要存在，否则着色器不带实例颜色
+        if (tinted) {
+            for (let i = 0; i < capacity; i++)
+                this.main.setColorAt(i, WHITE);
+        }
         this.main.count = 0;
         this.ghostMaterial = ghostMaterial;
         this.ghost = ghostMaterial ? new InstancedMesh(geometry, ghostMaterial, capacity) : null;
@@ -77,10 +78,12 @@ class InstPair {
     }
 
     /** dim 的那份在没有淡化网格（图标贴花）时不画 */
-    add(m: Matrix4, dim: boolean) {
-        if (!dim)
+    add(m: Matrix4, dim: boolean, tint: Color | null = null) {
+        if (!dim) {
+            if (this.tinted)
+                this.main.setColorAt(this.nMain, tint ?? WHITE);
             this.main.setMatrixAt(this.nMain++, m);
-        else if (this.ghost)
+        } else if (this.ghost)
             this.ghost.setMatrixAt(this.nGhost++, m);
     }
 
@@ -88,6 +91,8 @@ class InstPair {
         this.main.count = this.nMain;
         this.main.visible = this.nMain > 0;
         this.main.instanceMatrix.needsUpdate = true;
+        if (this.main.instanceColor)
+            this.main.instanceColor.needsUpdate = true;
         if (this.ghost) {
             this.ghost.count = this.nGhost;
             this.ghost.visible = this.nGhost > 0;
@@ -116,23 +121,16 @@ function decalGeometry() {
     return g;
 }
 
-function decalMaterial(atlas: Texture | null, gridSize: Vector2) {
+function decalMaterial(atlas: Texture | null) {
     const m = new MeshBasicMaterial({ side: DoubleSide, transparent: true, depthWrite: false });
-    m.onBeforeCompile = shader => {
-        shader.uniforms.uIcons = { value: atlas };
-        shader.uniforms.uIconGrid = { value: gridSize };
-        shader.vertexShader = 'attribute float cargoIcon;\nuniform vec2 uIconGrid;\nvarying vec2 vDecalUv;\nvarying vec2 vDecalCell;\n'
-            + shader.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-	vDecalUv = uv;
-	float decalId = floor(cargoIcon + 0.5);
-	vDecalCell = vec2(mod(decalId, uIconGrid.x), floor(decalId / uIconGrid.x));`);
-        shader.fragmentShader = 'uniform sampler2D uIcons;\nuniform vec2 uIconGrid;\nvarying vec2 vDecalUv;\nvarying vec2 vDecalCell;\n'
-            + shader.fragmentShader.replace('#include <map_fragment>', `
-	vec4 icon = texture2D(uIcons, (vDecalUv + vDecalCell) / uIconGrid);
+    patchIconAtlas(m, {
+        atlas,
+        fragment: `
+	vec4 icon = atlasIcon(vIconUv);
 	if (icon.a < 0.05) discard;
-	diffuseColor = vec4(icon.rgb, icon.a);`);
-    };
-    m.customProgramCacheKey = () => 'sorter-icon-decal';
+	diffuseColor = vec4(icon.rgb, icon.a);`,
+        cacheKey: 'sorter-icon-decal',
+    });
     return m;
 }
 
@@ -187,8 +185,9 @@ class TierModel {
     private mask: Uint8Array | null = null;
     /** false（关闭流向或减少动态效果）时时间不再前进，抓手停在 PARKED_PHASE */
     private flowing = true;
+    private tintOf: (index: number) => Color | null = () => null;
 
-    constructor(readonly modelIndex: number, private readonly sorters: SorterState[], gltf: GLTFLike, atlas: Texture | null, gridSize: Vector2, arrowSpeed: number | undefined) {
+    constructor(readonly modelIndex: number, private readonly sorters: SorterState[], gltf: GLTFLike, atlas: Texture | null, arrowSpeed: number | undefined) {
         const tier = SORTER_TIER_OF_MODEL[modelIndex];
         this.group.name = `sorter-${modelIndex}`;
         this.cycle = cycleSeconds(buildingMeta.get(modelIndex)?.work?.inserterSpeed ?? DEFAULT_STT[tier] ?? DEFAULT_STT[1]);
@@ -207,9 +206,9 @@ class TierModel {
             if (pair.ghost)
                 this.group.add(pair.ghost);
         }
-        const decal = decalMaterial(atlas, gridSize);
+        const decal = decalMaterial(atlas);
         const decalGeo = decalGeometry();
-        this.decals = new InstPair('icon', decalGeo, decal, sorters.length, null);
+        this.decals = new InstPair('icon', decalGeo, decal, sorters.length, null, false);
         const iconAttr = new InstancedBufferAttribute(new Float32Array(sorters.length), 1);
         decalGeo.setAttribute('cargoIcon', iconAttr);
         this.decalIcons = iconAttr;
@@ -228,6 +227,9 @@ class TierModel {
             const dim = ghostOf(material);
             this.materials.push(dim);
             const built = parts.build(material, dim);
+            // 模型没带法线时按合并后的几何算，不能拿位置当法线
+            if (!mesh.geometry.getAttribute('normal'))
+                built.geometry.computeVertexNormals();
             built.frustumCulled = false;
             built.name = name;
             this.group.add(built);
@@ -259,9 +261,10 @@ class TierModel {
                 const frame = F && F.getX(i) > 0.5 ? 1 : 0;
                 stretchVertex(s.shape, frame, tmp.set(P.getX(i), P.getY(i), P.getZ(i)), pos);
                 parts.positions.push(pos.x, pos.y, pos.z);
-                if (N)
+                if (N) {
                     tmp.set(N.getX(i), N.getY(i), N.getZ(i)).transformDirection(s.shape.stretch[frame]);
-                parts.normals.push(tmp.x, tmp.y, tmp.z);
+                    parts.normals.push(tmp.x, tmp.y, tmp.z);
+                }
                 if (U)
                     parts.uv0.push(U.getX(i), arrow ? (frame === 1 ? s.shape.arrowLength : 0) : U.getY(i));
             }
@@ -291,17 +294,18 @@ class TierModel {
         let nIcon = 0;
         for (const s of this.sorters) {
             const dim = this.isDim(s);
+            const tint = this.tintOf(s.building.index);
             const { shape } = s;
-            this.pairs.get('ACap')?.add(shape.aFrame, dim);
-            this.pairs.get('BCap')?.add(shape.bFrame, dim);
+            this.pairs.get('ACap')?.add(shape.aFrame, dim, tint);
+            this.pairs.get('BCap')?.add(shape.bFrame, dim, tint);
             if (shape.aRail)
-                this.pairs.get('ARail')?.add(shape.aFrame, dim);
+                this.pairs.get('ARail')?.add(shape.aFrame, dim, tint);
             if (shape.bRail)
-                this.pairs.get('BRail')?.add(shape.bFrame, dim);
+                this.pairs.get('BRail')?.add(shape.bFrame, dim, tint);
             const loaded = grabberAt(shape, this.phaseOf(s), grabberMatrix);
-            this.pairs.get('grabber')?.add(grabberMatrix, dim);
+            this.pairs.get('grabber')?.add(grabberMatrix, dim, tint);
             if (loaded) {
-                this.pairs.get('grabberLoaded')?.add(grabberMatrix, dim);
+                this.pairs.get('grabberLoaded')?.add(grabberMatrix, dim, tint);
                 if (s.icon && !dim) {
                     icons.setX(nIcon++, s.icon);
                     this.decals.add(decalMatrix.multiplyMatrices(grabberMatrix, decalLift), false);
@@ -340,6 +344,17 @@ class TierModel {
         this.write();
     }
 
+    /** 悬停/选中的实例颜色（端件、护轨、抓手；顶梁与箭头是合并网格，不染色） */
+    setTint(tintOf: (index: number) => Color | null) {
+        this.tintOf = tintOf;
+        this.write();
+    }
+
+    /** 携带物品变了（编辑后重新推断）：下次写实例时用新的图标 */
+    invalidate() {
+        this.dirty = true;
+    }
+
     dispose() {
         for (const pair of this.pairs.values())
             pair.dispose();
@@ -374,12 +389,15 @@ export class RealSorters {
     private readonly types = new Map<number, TypeEntry>();
     private readonly indices = new Set<number>();
     private mask: Uint8Array | null = null;
+    private hovered: number | null = null;
+    private selected: ReadonlySet<number> = new Set();
+    private readonly tintOf = (index: number) => tintFor(index, this.hovered, this.selected);
 
     /**
      * @param carried 建筑 index → 物品 id（inferCarriedItems 的结果）
      * @param iconOf  物品 id → 图集下标（IconTexture.requestIcon(itemIconId(id))）
      */
-    constructor(private readonly ctx: LayerContext, carried: ReadonlyMap<number, number>, iconOf: (itemId: number) => number) {
+    constructor(private readonly ctx: LayerContext, carried: ReadonlyMap<number, number>, private readonly iconOf: (itemId: number) => number) {
         for (const b of ctx.buildings) {
             if (!isInserter(b.itemId))
                 continue;
@@ -398,12 +416,9 @@ export class RealSorters {
         for (const t of this.types.values()) {
             const sub = new Group();
             sub.name = `sorter-placeholder-${t.modelIndex}`;
-            const layer = createLinksLayer();
-            // 只画这一级的分拣器弧线：给它一份去掉传送带的蓝图
-            layer.build({
-                ...ctx, root: sub, buildings: t.sorters.map(s => s.building),
-                data: { ...ctx.data, buildings: ctx.data.buildings.filter(b => !isBelt(b.itemId)) },
-            });
+            // 只画这一级的分拣器弧线，不建传送带路径
+            const layer = createLinksLayer({ belts: false });
+            layer.build({ ...ctx, root: sub, buildings: t.sorters.map(s => s.building) });
             t.placeholder = layer;
             t.placeholderRoot = sub;
             this.root.add(sub);
@@ -419,16 +434,13 @@ export class RealSorters {
         return this.indices.has(index);
     }
 
-    shown(modelIndex: number) {
-        return this.types.get(modelIndex)?.model != null;
-    }
-
     attach(modelIndex: number, gltf: GLTFLike, arrowSpeed?: number) {
         const t = this.types.get(modelIndex);
         if (!t || t.model)
             return;
-        const model = new TierModel(modelIndex, t.sorters, gltf, this.ctx.iconTexture.texture ?? null, new Vector2(IconTexture.WIDTH, IconTexture.HEIGHT), arrowSpeed);
+        const model = new TierModel(modelIndex, t.sorters, gltf, this.ctx.iconTexture.texture ?? null, arrowSpeed);
         model.setMask(this.mask);
+        model.setTint(this.tintOf);
         model.update(0, this.ctx.view.flow);
         t.model = model;
         this.root.add(model.group);
@@ -448,6 +460,32 @@ export class RealSorters {
         for (const t of this.types.values()) {
             t.placeholder?.setHighlight?.(mask);
             t.model?.setMask(mask);
+        }
+    }
+
+    setHover(index: number | null) {
+        this.hovered = index;
+        this.retint();
+    }
+
+    setSelected(indices: ReadonlySet<number>) {
+        this.selected = new Set(indices);
+        this.retint();
+    }
+
+    private retint() {
+        for (const t of this.types.values())
+            t.model?.setTint(this.tintOf);
+    }
+
+    /** 编辑后重新推断的携带物品：建筑 index → 物品 id */
+    setCarried(carried: ReadonlyMap<number, number>) {
+        for (const t of this.types.values()) {
+            for (const s of t.sorters) {
+                const itemId = carried.get(s.building.index);
+                s.icon = itemId ? this.iconOf(itemId) : 0;
+            }
+            t.model?.invalidate();
         }
     }
 

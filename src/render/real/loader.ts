@@ -38,21 +38,36 @@ export function modelsBaseUrl() {
 /**
  * 按路径缓存的 GLB 加载器：同一路径只下载一次，结果（几何体、材质）在调用方之间共享，
  * 调用方不应修改它们；下载或解析失败的路径会被忘掉，下次调用重新下载。
+ * 下载进度报给所有在等这个路径的调用方（后来的先收到已下载的字节数）。
  */
 export function createGlbLoader(source: GlbSource, base = modelsBaseUrl()): LoadGlb {
-    const cache = new Map<string, Promise<GLTFLike>>();
+    interface Entry { promise: Promise<GLTFLike>, received: number, listeners: Set<(received: number) => void> }
+    const cache = new Map<string, Entry>();
     return (path, onBytes) => {
-        let p = cache.get(path);
-        if (p === undefined) {
+        const e = cache.get(path);
+        if (e === undefined) {
             const url = base + path;
-            p = source.fetch(url, onBytes).then(data => source.parse(data, url));
-            cache.set(path, p);
-            p.catch(() => {
-                if (cache.get(path) === p)
+            const entry: Entry = { promise: null!, received: 0, listeners: new Set(onBytes ? [onBytes] : []) };
+            const report = (n: number) => {
+                entry.received = n;
+                for (const l of entry.listeners)
+                    l(n);
+            };
+            entry.promise = source.fetch(url, report).then(data => source.parse(data, url));
+            entry.promise.then(() => entry.listeners.clear(), () => {
+                entry.listeners.clear();
+                if (cache.get(path) === entry)
                     cache.delete(path);
             });
+            cache.set(path, entry);
+            return entry.promise;
         }
-        return p;
+        if (onBytes) {
+            if (e.received > 0)
+                onBytes(e.received);
+            e.listeners.add(onBytes);
+        }
+        return e.promise;
     };
 }
 

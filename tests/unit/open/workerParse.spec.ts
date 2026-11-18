@@ -11,7 +11,7 @@ const fixture = readFileSync(join(__dirname, '../blueprint/fixtures/v0.10.35.txt
 function fakeWorker(onPost: (code: string, reply: (m: WorkerOut) => void) => void): WorkerLike & { terminated: boolean } {
     const w: WorkerLike & { terminated: boolean } = {
         terminated: false,
-        onmessage: null, onerror: null,
+        onmessage: null, onerror: null, onmessageerror: null,
         postMessage(code: string) {
             Promise.resolve().then(() => onPost(code, m => w.onmessage?.({ data: structuredClone(m) } as MessageEvent<WorkerOut>)));
         },
@@ -76,6 +76,30 @@ describe('createWorkerParser', () => {
         const parse = createWorkerParser({ create: () => w, fallback: (c, o) => fromStr(c, o) });
         expect(await parse(fixture, {})).toEqual(fromStr(fixture));
         expect(w.terminated).toBe(true);
+    });
+    it('falls back when the result cannot be deserialised (onmessageerror) instead of hanging', async () => {
+        const w = fakeWorker(() => undefined);
+        w.postMessage = () => { Promise.resolve().then(() => w.onmessageerror?.({} as MessageEvent)); };
+        const parse = createWorkerParser({ create: () => w, fallback: (c, o) => fromStr(c, o) });
+        expect(await parse(fixture, {})).toEqual(fromStr(fixture));
+        expect(w.terminated).toBe(true);
+    });
+    it('terminates the worker and rejects with AbortError when the parse is superseded', async () => {
+        const w = fakeWorker(() => undefined); // never replies
+        const parse = createWorkerParser({ create: () => w, fallback: () => { throw new Error('no'); } });
+        const ac = new AbortController();
+        const p = parse(fixture, { signal: ac.signal });
+        ac.abort();
+        await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+        expect(w.terminated).toBe(true);
+    });
+    it('does not start a worker for an already-aborted parse', async () => {
+        const create = jest.fn(() => fakeWorker(() => undefined));
+        const parse = createWorkerParser({ create, fallback: () => { throw new Error('no'); } });
+        const ac = new AbortController();
+        ac.abort();
+        await expect(parse(fixture, { signal: ac.signal })).rejects.toMatchObject({ name: 'AbortError' });
+        expect(create).not.toHaveBeenCalled();
     });
 });
 

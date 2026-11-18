@@ -93,7 +93,7 @@ def test_protosets_carry_game_version(raw):
         assert d["gameVersion"] == "0.10.35"
         assert d["dataArray"]
     midi = json.loads((raw / "protosets/MIDIProtoSet.json").read_text())
-    assert midi["dataArray"][0] == {"ID": 1, "Instrument": 1, "PitchRange": 0}
+    assert midi["dataArray"][0] == {"ID": 1, "Instrument": 1, "PitchRange": [6, 101]}
 
 
 def test_icons_are_pngs_with_source_pixels(raw):
@@ -237,3 +237,19 @@ def test_remote_end_to_end_with_fake_host(game, tmp_path):
     assert run(game, local) == 0
     assert files_under(out) == files_under(local), "remote and local sources yield identical output"
     assert list((tmp_path / "remote-temp").iterdir()) == []
+
+
+def test_icon_names_differing_only_in_case_are_rejected(game, tmp_path, capsys):
+    # icons/<category>/<name>.png: on case-insensitive file systems (macOS, Windows) these two
+    # files would overwrite each other
+    from fakes import default_icons, default_protosets
+    protosets = default_protosets()
+    protosets["ItemProtoSet"]["dataArray"].append(
+        {"ID": 1002, "Name": "铜矿", "CanBuild": 0, "ModelIndex": 0, "ModelCount": 0, "Grade": 0,
+         "Upgrades": [], "BuildIndex": 0, "IconPath": "Icons/Other/Iron-Ore"})
+    icons = default_icons()
+    icons["Icons/Other/Iron-Ore"] = icons["Icons/ItemRecipe/iron-ore"]
+    out = tmp_path / "out"
+    assert run(game, out, reader_factory(protosets=protosets, icons=icons)) != 0
+    assert "iron-ore" in capsys.readouterr().err.lower()
+    assert not (out / "raw").exists()

@@ -409,15 +409,19 @@ class UnityReader:
         self._prefetch([(r.assets_file.name, r.byte_start, r.byte_start + r.byte_size)
                         for r in textures.values() if r.assets_file.name in SPARSE_FILES])
         parsed = {path: r.read() for path, r in textures.items()}
-        streamed = {path: t for path, t in parsed.items() if t.m_StreamData and t.m_StreamData.size}
-        stream_ranges = [(f"{DATA}/{posixpath.basename(t.m_StreamData.path.replace(chr(92), '/'))}",
-                          t.m_StreamData.offset, t.m_StreamData.size) for t in streamed.values()]
-        stream_data = dict(zip(streamed, self.source.read_ranges(stream_ranges))) if stream_ranges else {}
+        stream_data = self.read_streams(parsed)
         self.log(f"decoding {len(parsed)} icons from {sorted(files)} ({len(stream_data)} streamed)")
         out = {}
         for path, t in parsed.items():
             out[path] = self._decode(t, stream_data.get(path))
         return out
+
+    def read_streams(self, parsed):
+        """{key: Texture2D} -> {key: bytes} for the textures whose pixels live in a .resS stream (one batch)."""
+        streamed = {k: t for k, t in parsed.items() if t.m_StreamData and t.m_StreamData.size}
+        ranges = [(f"{DATA}/{posixpath.basename(t.m_StreamData.path.replace(chr(92), '/'))}",
+                   t.m_StreamData.offset, t.m_StreamData.size) for t in streamed.values()]
+        return dict(zip(streamed, self.source.read_ranges(ranges))) if ranges else {}
 
     @staticmethod
     def _decode(tex, stream_bytes):

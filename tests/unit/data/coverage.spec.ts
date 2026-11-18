@@ -32,7 +32,9 @@ describe('generated game data coverage', () => {
     });
 
     describe('models manifest', () => {
-        const readManifest = () => JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        type Entry = { file: string };
+        type Manifest = { buildings: Record<string, Entry>; belts: Record<string, Entry>; sorters: Record<string, Entry> };
+        const readManifest = (): Manifest => JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
         test('lists an existing GLB for every static building model with metadata', () => {
             const manifest = readManifest();
@@ -54,7 +56,7 @@ describe('generated game data coverage', () => {
             expect(Object.keys(manifest.belts).sort()).toEqual(['mk1', 'mk2', 'mk3']);
             const tiers = Object.keys(manifest.sorters).filter(k => !k.endsWith('-lod2')).sort();
             expect(tiers).toEqual(['sorter-mk1', 'sorter-mk2', 'sorter-mk3', 'sorter-mk4']);
-            for (const e of [...Object.values<any>(manifest.belts), ...Object.values<any>(manifest.sorters)]) {
+            for (const e of [...Object.values(manifest.belts), ...Object.values(manifest.sorters)]) {
                 expect(fs.existsSync(path.join(path.dirname(manifestPath), e.file))).toBe(true);
             }
         });

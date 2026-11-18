@@ -37,6 +37,3 @@ def flip_v(uv):
 def mirror_translation(t):
     return [-t[0], t[1], t[2]]
 
-
-def mirror_quat(q):
-    return [q[0], -q[1], -q[2], q[3]]

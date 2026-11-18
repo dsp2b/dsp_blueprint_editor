@@ -4,14 +4,16 @@ import { calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
 import { buildingMeta, noIconBuildings } from '@/data/building';
 import { isBelt, isInserter } from '@/data/items';
 import { itemIconId, recipeIconId } from '@/data/icons';
+import { recipesMap } from '@/data/recipes';
 import { IconTexture } from '@/iconTexture';
 import { IconGeometry, Icons } from '@/icons';
 import { IconSubscript } from '@/iconSubscript';
 import { Updater } from '@/command';
 import { inserterHeight } from './pick';
 
+/** 配方图标；配方不在数据里（更新版本游戏的蓝图）时用建筑自己的图标 */
 export function buildingIconId(b: BlueprintBuilding) {
-    return b.recipeId > 0 ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
+    return b.recipeId > 0 && recipesMap.has(b.recipeId) ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
 }
 
 const ICON_LIFT = 0.04;
@@ -125,8 +127,8 @@ export function buildBadges(renderer: WebGLRenderer, buildings: BlueprintBuildin
         dispose() {
             icons.dispose();
             iconsMesh.material.dispose();
-            subscriptsMesh?.geometry.dispose();
-            iconTexture.texture.dispose();
+            subscriptsMesh?.dispose();
+            iconTexture.dispose();
         },
     };
 }

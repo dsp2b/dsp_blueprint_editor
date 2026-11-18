@@ -147,6 +147,8 @@ export class IconGeometry extends InstancedBufferGeometry {
 
     private indexMap = new Map<BlueprintBuilding, number>();
     private nextIndex = 0;
+    /** 当前的淡化规则（setDim），之后新加的图标也按它淡化 */
+    private dim: ((b: BlueprintBuilding) => boolean) | null = null;
 
     reserve(length: number) {
         this.dispose();
@@ -182,6 +184,9 @@ export class IconGeometry extends InstancedBufferGeometry {
         scale.toArray(scaleAttr.array, index * 2);
         (axes?.x ?? zero3).toArray(axisXAttr.array, index * 3);
         (axes?.y ?? zero3).toArray(axisYAttr.array, index * 3);
+        const dimAttr = this.getAttribute('iconDim') as InstancedBufferAttribute;
+        (dimAttr.array as Float32Array)[index] = this.dim?.(b) ? 1 : 0;
+        dimAttr.needsUpdate = true;
 
         if (update) {
             updateAttr(idAttr, index);
@@ -195,6 +200,7 @@ export class IconGeometry extends InstancedBufferGeometry {
 
     /** 按建筑淡化图标：dim(b) 为 true 的图标变淡 */
     setDim(dim: ((b: BlueprintBuilding) => boolean) | null) {
+        this.dim = dim;
         const attr = this.getAttribute('iconDim') as InstancedBufferAttribute;
         const arr = attr.array as Float32Array;
         arr.fill(0);

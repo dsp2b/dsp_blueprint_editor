@@ -116,3 +116,51 @@ def test_remote_has_no_local_path(game, tmp_path):
     src, _ = remote(game, tmp_path)
     assert src.local_path("DSPGAME_Data/resources.assets") is None
     assert LocalGameSource(game).local_path("DSPGAME_Data/resources.assets") == game / "DSPGAME_Data/resources.assets"
+
+
+class LosesMkdirOutput(FakeHost):
+    """The remote dir gets created but the call reporting it fails (dropped link, Ctrl-C)."""
+
+    def make_temp_dir(self, name):
+        super().make_temp_dir(name)
+        raise RuntimeError("connection dropped after mkdir")
+
+
+def test_remote_temp_dir_removed_even_if_creation_reply_is_lost(game, tmp_path):
+    host = LosesMkdirOutput(game, tmp_path / "remote-temp")
+    src = RemoteGameSource(host, "C:/Games/DSP")
+    with pytest.raises(RuntimeError, match="connection dropped"):
+        with src:
+            src.read("DSPGAME_Data/resources.assets.resS", 0, 1)
+    assert list((tmp_path / "remote-temp").iterdir()) == []
+
+
+class CleanupFails(FakeHost):
+    def remove_temp_dir(self, name):
+        self.calls.append(("remove_temp_dir", name))
+        raise RuntimeError("cleanup also failed")
+
+
+def test_cleanup_failure_does_not_hide_the_original_error(game, tmp_path):
+    logs = []
+    host = CleanupFails(game, tmp_path / "remote-temp", fail_extract=True)
+    src = RemoteGameSource(host, "C:/Games/DSP", log=logs.append)
+    with pytest.raises(RuntimeError, match="remote range read failed"):
+        with src:
+            src.read("DSPGAME_Data/resources.assets.resS", 0, 1)
+    assert any("cleanup also failed" in m for m in logs)
+
+
+def test_cleanup_failure_is_raised_when_nothing_else_failed(game, tmp_path):
+    host = CleanupFails(game, tmp_path / "remote-temp")
+    src = RemoteGameSource(host, "C:/Games/DSP")
+    with pytest.raises(RuntimeError, match="cleanup also failed"):
+        with src:
+            src.read("DSPGAME_Data/resources.assets.resS", 0, 1)
+
+
+@pytest.mark.parametrize("bad", ["a\tb", "a\nb", "a\rb"])
+def test_relative_paths_reject_control_characters(bad):
+    from tools.extract.source import check_rel
+    with pytest.raises(ValueError):
+        check_rel(bad)

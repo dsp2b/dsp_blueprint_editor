@@ -81,6 +81,13 @@ export class IconSubscript extends Mesh {
         }
     }
 
+    /** 几何体、自己的材质和字形贴图都只属于这个角标网格 */
+    dispose() {
+        this.geometry.dispose();
+        (this.material as IconsMaterial).dispose();
+        this.fontTexture.texture.dispose();
+    }
+
     needsUpdate() {
         this.geometry.getAttribute('iconId').needsUpdate = true;
         this.geometry.getAttribute('iconPos').needsUpdate = true;

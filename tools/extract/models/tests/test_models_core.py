@@ -39,9 +39,8 @@ def test_mirrored_mesh_keeps_faces_pointing_along_their_normals():
     assert float(bad @ n[0]) < 0
 
 
-def test_translation_and_rotation_mirror():
+def test_translation_mirror():
     assert coords.mirror_translation((1, 2, 3)) == [-1, 2, 3]
-    assert coords.mirror_quat((0.1, 0.2, 0.3, 0.9)) == [0.1, -0.2, -0.3, 0.9]
 
 
 # ---------------------------------------------------------------- glb writing

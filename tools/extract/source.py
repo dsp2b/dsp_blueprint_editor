@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -24,6 +25,7 @@ REMOTE_TEMP_PREFIX = "dsp-extract-"
 def check_rel(path: str) -> str:
     """Reject anything that could escape the game directory."""
     if not isinstance(path, str) or not path or "\\" in path or path.startswith("/") \
+            or any(ord(c) < 0x20 for c in path) \
             or re.match(r"^[A-Za-z]:", path) or any(p in ("", ".", "..") for p in path.split("/")):
         raise ValueError(f"invalid game-relative path: {path!r}")
     return path
@@ -65,9 +67,19 @@ class GameSource:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.close()
+            return False
+        # 已有异常在传播时，清理失败（多半是同一条断开的连接）只记录，不覆盖原始错误
+        try:
+            self.close()
+        except Exception as e:  # noqa: BLE001
+            self._log_cleanup_failure(e)
         return False
+
+    def _log_cleanup_failure(self, e):
+        print(f"warning: cleanup failed: {e}", file=sys.stderr, flush=True)
 
 
 class LocalGameSource(GameSource):
@@ -120,8 +132,10 @@ class RemoteGameSource(GameSource):
         self.game_dir = game_dir
         self.log = log or (lambda msg: None)
         self._listings: Dict[str, Optional[Dict[str, Optional[int]]]] = {}
+        # 名字先在本地定好再创建：创建的回包丢了（断线、Ctrl-C）也知道该删哪个目录
+        self._temp_name: Optional[str] = None
         self._temp: Optional[str] = None
-        self.bytes_read = 0
+        self._removing: Optional[str] = None
 
     def _listing(self, rel_dir: str):
         if rel_dir not in self._listings:
@@ -159,13 +173,13 @@ class RemoteGameSource(GameSource):
             if o < 0 or n < 0 or o + n > size:
                 raise ExtractError(f"short read: {p} @{o}+{n} (file is {size} bytes)")
         if self._temp is None:
-            self._temp = self.host.make_temp_dir()
+            self._temp_name = REMOTE_TEMP_PREFIX + uuid.uuid4().hex
+            self._temp = self.host.make_temp_dir(self._temp_name)
             self.log(f"remote scratch dir: {self._temp}")
         blob = self.host.extract_ranges(self.game_dir, self._temp, ranges)
         want = sum(n for _, _, n in ranges)
         if len(blob) != want:
             raise ExtractError(f"remote range read returned {len(blob)} bytes, expected {want}")
-        self.bytes_read += want
         out, pos = [], 0
         for _, _, n in ranges:
             out.append(blob[pos:pos + n])
@@ -176,16 +190,32 @@ class RemoteGameSource(GameSource):
         return f"remote game dir {self.game_dir}"
 
     def close(self):
-        temp, self._temp = self._temp, None
-        if temp is not None:
-            self.host.remove_temp_dir(temp)
-            self.log(f"removed remote scratch dir: {temp}")
+        name, self._temp_name, self._temp = self._temp_name, None, None
+        if name is not None:
+            self._removing = name
+            self.host.remove_temp_dir(name)
+            self.log(f"removed remote scratch dir: {name}")
+
+    def _log_cleanup_failure(self, e):
+        self.log(f"warning: could not remove remote scratch dir %TEMP%\\{self._removing}: {e}")
 
 
 # ---------------------------------------------------------------- opsctl transport
 
+_PS_QUOTES = "'\u2018\u2019\u201a\u201b"  # PowerShell treats all of these as single quotes
+
+
 def _ps_literal(s: str) -> str:
-    return "'" + s.replace("'", "''") + "'"
+    return "'" + "".join(c + c if c in _PS_QUOTES else c for c in s) + "'"
+
+
+_TEMP_NAME = re.compile("^" + re.escape(REMOTE_TEMP_PREFIX) + "[0-9A-Za-z]+$")
+
+
+def _check_temp_name(name: str) -> str:
+    if not isinstance(name, str) or not _TEMP_NAME.match(name):
+        raise ExtractError(f"refusing to touch unexpected remote temp dir {name!r}")
+    return name
 
 
 def _win_to_opsctl(path: str) -> str:
@@ -233,14 +263,14 @@ foreach ($c in Get-ChildItem -LiteralPath $p -Force) {
 
 _MKTEMP_PS = r"""
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
-$d = Join-Path ([IO.Path]::GetTempPath()) ('__PREFIX__' + [guid]::NewGuid().ToString('N'))
+$d = Join-Path ([IO.Path]::GetTempPath()) __NAME__
 [void](New-Item -ItemType Directory -Path $d)
 "@@DIR`t" + $d
 """
 
 _RMTEMP_PS = r"""
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
-$d = __TMP__
+$d = Join-Path ([IO.Path]::GetTempPath()) __NAME__
 if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force }
 if (Test-Path -LiteralPath $d) { throw ('still exists: ' + $d) }
 '@@GONE'
@@ -289,19 +319,19 @@ class OpsctlHost:
                 out[name] = int(size) if kind == "@@F" else None
         return out
 
-    def make_temp_dir(self):
-        lines = self._ps(_MKTEMP_PS.replace("__PREFIX__", REMOTE_TEMP_PREFIX), "temp dir creation")
+    def make_temp_dir(self, name):
+        """Create %TEMP%\\<name> on the remote side and return its full path."""
+        lines = self._ps(_MKTEMP_PS.replace("__NAME__", _ps_literal(_check_temp_name(name))), "temp dir creation")
         for line in lines:
             if line.startswith("@@DIR\t"):
                 return line.split("\t", 1)[1]
         raise ExtractError("remote temp dir creation printed no path")
 
-    def remove_temp_dir(self, path):
-        if not posixpath.basename(path.replace("\\", "/")).startswith(REMOTE_TEMP_PREFIX):
-            raise ExtractError(f"refusing to delete unexpected remote path {path}")
-        lines = self._ps(_RMTEMP_PS.replace("__TMP__", _ps_literal(path)), f"deletion of {path}")
+    def remove_temp_dir(self, name):
+        """Delete %TEMP%\\<name> (only names this tool creates); missing is fine."""
+        lines = self._ps(_RMTEMP_PS.replace("__NAME__", _ps_literal(_check_temp_name(name))), f"deletion of {name}")
         if "@@GONE" not in lines:
-            raise ExtractError(f"remote temp dir {path} may not have been deleted")
+            raise ExtractError(f"remote temp dir {name} may not have been deleted")
 
     def extract_ranges(self, game_dir, temp_dir, ranges):
         with tempfile.TemporaryDirectory(prefix="dsp-extract-") as local:

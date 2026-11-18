@@ -5,8 +5,9 @@ import { BlueprintArea, BlueprintBuilding, BlueprintData } from '@/blueprint/par
 import { calcBuildingTrans, findPosForAreas } from '@/blueprint/planet';
 import { BELT_R, BeltPath, buildBeltPaths } from '@/render/beltPath';
 import {
-    beltNodes, beltRings, capPlacements, MergedParts, METERS_PER_TEX_REPEAT, sectionOf, sweep,
+    beltNodes, beltRings, capPlacements, METERS_PER_TEX_REPEAT, sectionOf, sweep,
 } from '@/render/real/belts';
+import { MergedParts } from '@/render/core/mergedParts';
 import { beltMetersPerSecond, cargoOffsets, cargoPlateGeometry, sampleRings } from '@/render/real/cargo';
 
 // ───────── 读真实的 belt-mk1.glb（只取 segment 网格的访问器） ─────────

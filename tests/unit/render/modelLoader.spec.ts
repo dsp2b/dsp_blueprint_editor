@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, Vector3, WebGLRenderer } from "three";
+import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Vector3, WebGLRenderer } from "three";
 import { BlueprintBuilding, fromStr } from "@/blueprint/parser";
 import { calcBuildingTrans, findPosForAreas } from "@/blueprint/planet";
 import { buildingMeta } from "@/data/building";
@@ -138,6 +138,24 @@ describe('createGlbLoader', () => {
         expect(fetch.mock.calls[1][0]).toBe('/base/models/belt/belt-mk1.glb');
     });
 
+    it('reports download progress to every caller waiting on the same path, not only the first', async () => {
+        let report: (n: number) => void = () => undefined;
+        const body = deferred<ArrayBuffer>();
+        const fetch = jest.fn((_url: string, onBytes?: (n: number) => void) => { report = onBytes ?? report; return body.promise; });
+        const loadGlb = createGlbLoader({ fetch, parse: async () => gltf() }, '/m/');
+        const first: number[] = [], second: number[] = [];
+        const a = loadGlb('62.glb', n => first.push(n));
+        report(100);
+        const b = loadGlb('62.glb', n => second.push(n));
+        report(250);
+        body.resolve(new ArrayBuffer(8));
+        await Promise.all([a, b]);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(first).toEqual([100, 250]);
+        // 后来的调用方先拿到已收到的字节数，再跟着后续进度
+        expect(second).toEqual([100, 250]);
+    });
+
     it('forgets a failed download so that a retry fetches it again', async () => {
         let fail = true;
         const fetch = jest.fn<Promise<ArrayBuffer>, [string]>(async () => {
@@ -249,7 +267,7 @@ function sampleBlueprint() {
         getDrawingBufferSize: (v: { set(x: number, y: number): unknown }) => v.set(800, 600),
     } as unknown as WebGLRenderer;
     const ctx: LayerContext = {
-        root: new Group(), renderer: fakeRenderer, R, data, buildings, transforms,
+        root: new Group(), renderer: fakeRenderer, camera: new PerspectiveCamera(), R, data, buildings, transforms,
         icons: new IconGeometry(buildings.length),
         iconTexture: { requestIcon: () => 1 } as unknown as IconTexture,
         view: { flow: true, badges: true, reducedMotion: false },
@@ -265,6 +283,9 @@ const modelGltf = (): GLTFLike => {
     scene.add(new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial()));
     return { scene };
 };
+
+/** 这类建筑已换成真实模型（场景里有它的实例化模型组） */
+const modelShown = (root: Object3D, modelIndex: number) => root.getObjectByName(`model-${modelIndex}`) !== undefined;
 
 describe('real model layer', () => {
     it('never requests the manifest or any model while it stays hidden (Simple mode)', async () => {
@@ -300,15 +321,15 @@ describe('real model layer', () => {
         await flush();
         expect(loadGlb.mock.calls.map(c => c[0]).sort()).toEqual(kinds.map(k => `${k.models[0]}.glb`).sort());
         expect(layer.progress).toMatchObject({ done: 2, total: 3, failed: 1 });
-        expect(layer.modelShown(kinds[0].models[0])).toBe(true);
-        expect(layer.modelShown(kinds[1].models[0])).toBe(false);
+        expect(modelShown(ctx.root, kinds[0].models[0])).toBe(true);
+        expect(modelShown(ctx.root, kinds[1].models[0])).toBe(false);
 
         fail = false;
         layer.retry();
         await flush();
         await flush();
         expect(layer.progress).toMatchObject({ done: 3, total: 3, failed: 0 });
-        expect(layer.modelShown(kinds[1].models[0])).toBe(true);
+        expect(modelShown(ctx.root, kinds[1].models[0])).toBe(true);
         layer.dispose();
     });
 

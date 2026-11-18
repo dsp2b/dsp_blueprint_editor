@@ -40,6 +40,7 @@ def png_bytes(img):
 
 def extract_icons(reader, protosets):
     wanted = {}  # (category, file name) -> icon path
+    by_key = {}  # (category, lower-cased file name) -> first icon path
     for ps, category in ICON_SOURCES:
         for entry in protosets[ps]["dataArray"]:
             path = entry.get("IconPath") or ""
@@ -48,9 +49,13 @@ def extract_icons(reader, protosets):
             name = posixpath.basename(path)
             if not _SAFE_NAME.fullmatch(name):
                 raise ExtractError(f"unexpected icon name {path!r} in {ps}ProtoSet")
-            prev = wanted.setdefault((category, name), path)
+            # 大小写不敏感的文件系统上 Iron.png 与 iron.png 是同一个文件：不同资源不能落到这样的两个名字上
+            key = (category, name.lower())
+            prev = by_key.setdefault(key, path)
             if prev.lower() != path.lower():
                 raise ExtractError(f"icons {prev!r} and {path!r} would both be written as {category}/{name}.png")
+            # 同一资源只是大小写不同：内容相同，两个名字都写（前端按各自的名字引用）
+            wanted.setdefault((category, name), path)
     images = reader.icons(sorted({p for p in wanted.values()}))
     files, missing = {}, []
     for (category, name), path in sorted(wanted.items()):

@@ -1,5 +1,6 @@
 import { Color } from 'three';
 import { itemsMap } from '@/data/items';
+import { tierOf as itemTier } from '@/analysis/facilities';
 
 export type Tier = 1 | 2 | 3;
 
@@ -11,11 +12,8 @@ export const TIER_COLORS: Record<Tier, Color> = {
     3: new Color(TIER_HEX[3]),
 };
 
-/** 有升级链的建筑按 Grade 给出 Mk.I/II/III；没有等级或超出三级的返回 null */
+/** 与侧栏设施列表同一条规则（见 analysis/facilities.tierOf）：Mk.IV 及以上共用最高一级的颜色 */
 export function tierOf(itemId: number): Tier | null {
     const item = itemsMap.get(itemId);
-    const grade = item?.grade ?? 0;
-    if ((item?.upgrades?.length ?? 0) < 2)
-        return null;
-    return grade >= 1 && grade <= 3 ? grade as Tier : null;
+    return item ? itemTier(item) : null;
 }

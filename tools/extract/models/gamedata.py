@@ -1,5 +1,4 @@
 """Plain-data views of the game assets the GLB builders consume (and, below, the reader that fills them)."""
-import posixpath
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -9,8 +8,6 @@ from ..errors import ExtractError
 from . import textures
 from .belt import BeltSource
 from .meshdata import parse_lod_desc, parse_mesh_data
-
-DATA = "DSPGAME_Data"
 
 
 class TexRef:
@@ -88,7 +85,7 @@ class GameModels:
     def _walk(self, go):
         yield go
         for r in self._comps(go):
-            if r.type.name == "Transform":
+            if r.type.name in ("Transform", "RectTransform"):  # 与 unity._node 一致
                 for ch in r.read().m_Children:
                     yield from self._walk(ch.deref().read().m_GameObject.deref().read())
                 return
@@ -199,10 +196,7 @@ class GameModels:
         readers = {k: r._reader for k, r in todo.items()}
         self._prefetch(readers.values())
         parsed = {k: r.read() for k, r in readers.items()}
-        streamed = {k: t for k, t in parsed.items() if t.m_StreamData and t.m_StreamData.size}
-        ranges = [(f"{DATA}/{posixpath.basename(t.m_StreamData.path.replace(chr(92), '/'))}", t.m_StreamData.offset, t.m_StreamData.size)
-                  for t in streamed.values()]
-        blobs = dict(zip(streamed, self.source.read_ranges(ranges))) if ranges else {}
+        blobs = self.reader.read_streams(parsed)
         self.log(f"decoding {len(parsed)} textures ({len(blobs)} streamed)")
         for key, t in parsed.items():
             img = textures.fit(self.reader._decode(t, blobs.get(key)).convert("RGBA"), MESH_LIMIT)

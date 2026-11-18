@@ -13,9 +13,11 @@ uv pip install --python tools/extract/.venv/bin/python -r tools/extract/requirem
 # or: python3.12 -m venv tools/extract/.venv && tools/extract/.venv/bin/pip install -r tools/extract/requirements-dev.txt
 ```
 
-Tests (no game files or network needed):
+Tests (no game files needed; runs `tests/`, `models/tests/` and `convert/tests/`). The model tests
+run the glTF validator, which needs `node` and a one-time `npm ci` in `tools/extract/validate/`:
 
 ```sh
+(cd tools/extract/validate && npm ci)
 cd tools/extract && .venv/bin/python -m pytest
 ```
 
