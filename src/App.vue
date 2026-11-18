@@ -139,6 +139,7 @@ import { useI18n } from 'vue-i18n';
 import { fromStr, toStr } from '@/blueprint/parser';
 import { supportedGameVersion } from '@/data/types';
 import { useBlueprintSession } from '@/open/session';
+import { createWorkerParser, WorkerLike } from '@/open/workerParser';
 import { createRecentStore } from '@/open/recentStore';
 import { sessionKey } from '@/open/keys';
 import OpenCard from './components/open/OpenCard.vue';
@@ -162,12 +163,20 @@ const renderer = ref<null | InstanceType<typeof BlueprintEditor>>(null);
 const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
 provide(rendererKey, renderer);
 
+const parseInWorker = createWorkerParser({
+    create: () => typeof Worker === 'undefined' ? null
+        : new Worker(new URL('./open/parseWorker.ts', import.meta.url)) as unknown as WorkerLike,
+    fallback: async (code, options) => {
+        // 先让出一帧，使"解析中"状态有机会渲染
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return fromStr(code, options);
+    },
+});
 const bpStr = ref('');
 const session = useBlueprintSession({
     parse: async (code, options) => {
-        // 先让出一帧，使"解析中"状态有机会渲染
-        await new Promise(resolve => setTimeout(resolve, 0));
-        const parsed = shallowReactive(fromStr(code, options));
+        // 解析放在 Worker 里，主线程才能在解析期间重绘进度；Worker 不可用时退回主线程
+        const parsed = shallowReactive(await parseInWorker(code, options));
         parsed.header = reactive(parsed.header);
         return parsed;
     },
