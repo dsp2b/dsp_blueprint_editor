@@ -1167,7 +1167,14 @@ function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
 const START = 'BLUEPRINT:';
 const TIME_BASE = new Date(0).setUTCFullYear(1);
 
-export function fromStr(strData: string): BlueprintData {
+export interface FromStrOptions {
+    /** 每读完一批建筑回调一次 (已读, 总数)，最后一次为 (总数, 总数) */
+    onProgress?: (done: number, total: number) => void;
+}
+
+const PROGRESS_STEP = 256;
+
+export function fromStr(strData: string, options: FromStrOptions = {}): BlueprintData {
     if (!strData.startsWith(START))
         throw Error('Invalid start');
 
@@ -1224,8 +1231,13 @@ export function fromStr(strData: string): BlueprintData {
 
     const numBuildings = reader.getInt32();
     const buildings: Array<BlueprintBuilding> = [];
-    for (let i = 0; i < numBuildings; i++)
+    const onProgress = options.onProgress;
+    for (let i = 0; i < numBuildings; i++) {
         buildings.push(importBuilding(reader));
+        if (onProgress && (i + 1) % PROGRESS_STEP === 0 && i + 1 < numBuildings)
+            onProgress(i + 1, numBuildings);
+    }
+    onProgress?.(numBuildings, numBuildings);
 
     const tail = reader.getBytes(reader.remaining());
 

@@ -1,9 +1,22 @@
 <template>
-    <div class="container">
+    <div class="container" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
         <BlueprintEditor ref="renderer"
             v-model:selectedBuildingIndex="selectedBuildingIndex"
             @update:selectedBuildingIndex="i => buildingFocused(i !== null)" />
-        <div class="sidebar" :class="{ expanded: expandSidebar }">
+        <OpenCard v-if="!data"
+            v-model:input="session.input.value"
+            :error="session.error.value" :loading="session.loading.value"
+            :recent="session.recent.value" :supported="supportedGameVersion" :dragging="dragging"
+            @open="openCode" @clear-recent="session.clearRecent()" />
+        <div v-if="!data" class="lang-float">
+            <label for="select-language-empty"><img src="@/assets/icons/translate.svg" alt="Languages"></label>
+            <select id="select-language-empty" v-model="lang">
+                <option value="auto">{{t('自动选择语言')}}</option>
+                <option value="en">English</option>
+                <option value="zh">中文</option>
+            </select>
+        </div>
+        <div v-if="data" class="sidebar" :class="{ expanded: expandSidebar }">
             <div>
                 <div class="info-tab tab"
                     :class="{ active: activeTab === 'info'}"
@@ -42,10 +55,10 @@
                     </div>
                     <textarea class="bp-code" rows="3" id="bp-str" v-model="bpStrInput"
                             @copy="onCopy" @cut="onCut" @paste="onPaste"
-                            @focus="encodeBp" @change="e => parseBp((e.target as HTMLTextAreaElement).value)">
+                            @focus="encodeBp" @change="e => openCode((e.target as HTMLTextAreaElement).value)">
                     </textarea>
                     <div class="row" style="align-items: stretch; column-gap: 4px;">
-                        <button @click="parseBp('')" :disabled="working"
+                        <button @click="clearBp" :disabled="working"
                                 style="position: relative; flex: auto; width: 50px;" >
                             {{ bpStr ? t("清空") : t("选择文件") }}
                             <input v-if="!bpStr" @change="onBpFile" :disabled="working"
@@ -58,7 +71,7 @@
                             {{ t("保存文件") }}
                         </a>
                     </div>
-                    <div class="error">{{ parseErrorMessage }}</div>
+                    <OpenError v-if="session.error.value" :error="session.error.value" />
                 </section>
                 <section>
                     <div class="row">
@@ -115,15 +128,21 @@
                 {{ version }}<SWStatus />
             </footer>
         </div>
-        <button class="expand-btn" :class="{ expanded: expandSidebar }"
+        <button v-if="data" class="expand-btn" :aria-label="t('侧边栏')" :class="{ expanded: expandSidebar }"
                 @click="expandSidebar = !expandSidebar" ></button>
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, reactive, ref, shallowReactive, watch, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { BlueprintData, fromStr, toStr } from '@/blueprint/parser';
+import { fromStr, toStr } from '@/blueprint/parser';
+import { supportedGameVersion } from '@/data/types';
+import { useBlueprintSession } from '@/open/session';
+import { createRecentStore } from '@/open/recentStore';
+import { sessionKey } from '@/open/keys';
+import OpenCard from './components/open/OpenCard.vue';
+import OpenError from './components/open/OpenError.vue';
 import { version, rendererKey, buildingInfoKey, commandQueueKey } from '@/define';
 import { BuildingInfo } from './blueprint/buildingInfo';
 
@@ -144,12 +163,26 @@ const replaceModal = ref<null | InstanceType<typeof ReplaceModal>>(null);
 provide(rendererKey, renderer);
 
 const bpStr = ref('');
-const data = shallowRef(null as BlueprintData | null);
+const session = useBlueprintSession({
+    parse: async (code, options) => {
+        // 先让出一帧，使"解析中"状态有机会渲染
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const parsed = shallowReactive(fromStr(code, options));
+        parsed.header = reactive(parsed.header);
+        return parsed;
+    },
+    store: createRecentStore(),
+    supported: supportedGameVersion,
+    confirmReplace: () => window.confirm(t('确认替换')),
+});
+provide(sessionKey, session);
+const data = session.data;
+const dragging = ref(false);
 const expandSidebar = ref(true);
 const activeTab = ref<'info' | 'operations'>('info')
-const working = ref(false);
+const busy = ref(false);
+const working = computed(() => busy.value || session.loading.value.active);
 const codeExpired = ref(false);
-const parseErrorMessage = ref('');
 const selectedBuildingIndex = ref(null as number | null);
 
 const commandQueue = computed(() => {
@@ -158,6 +191,8 @@ const commandQueue = computed(() => {
     return new CommandQueue(data.value);
 });
 provide(commandQueueKey, commandQueue);
+
+watch(codeExpired, expired => { if (expired) session.markDirty(); });
 
 watchEffect(onCleanup => {
     if (commandQueue.value) {
@@ -240,37 +275,59 @@ onUnmounted(() => {
     }
 })
 
-const parseBp = (s: string) => {
-    if (s) {
-        try {
-            data.value = shallowReactive(fromStr(s.trim()));
-            data.value.header = reactive(data.value.header);
-            parseErrorMessage.value = '';
-            watch(data.value, () => codeExpired.value = true);
-            gtag('event', 'bp_parse', {
-                'bp_length': s.length,
-            })
-        } catch (e) {
-            parseErrorMessage.value = String(e);
-            console.error(e);
-        }
-    } else {
-        data.value = null;
-        parseErrorMessage.value = '';
-    }
+let stopDataWatch: (() => void) | null = null;
+session.onOpened(parsed => {
+    stopDataWatch?.();
+    stopDataWatch = watch(parsed, () => codeExpired.value = true);
     selectedBuildingIndex.value = null;
-    bpStr.value = s;
+    bpStr.value = session.input.value.trim();
     codeExpired.value = false;
+    gtag('event', 'bp_parse', {
+        'bp_length': bpStr.value.length,
+    })
+});
+
+const openCode = (s: string) => session.open(s);
+
+const clearBp = () => {
+    stopDataWatch?.();
+    stopDataWatch = null;
+    session.close();
+    selectedBuildingIndex.value = null;
+    bpStr.value = '';
+    codeExpired.value = false;
+}
+
+const openFile = async (f: File) => {
+    busy.value = true;
+    try {
+        await session.open(await f.text());
+    } finally {
+        busy.value = false;
+    }
 }
 
 const onBpFile = async (e: Event) => {
     const input = e.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-        working.value = true;
-        parseBp(await input.files[0].text());
-        working.value = false;
-    }
+    if (input.files && input.files[0])
+        await openFile(input.files[0]);
     input.value = '';
+}
+
+const onDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes('Files'))
+        return;
+    e.preventDefault();
+    dragging.value = true;
+}
+
+const onDrop = (e: DragEvent) => {
+    dragging.value = false;
+    const f = e.dataTransfer?.files[0];
+    if (!f)
+        return;
+    e.preventDefault();
+    openFile(f);
 }
 
 const onCopy = (e: ClipboardEvent) => {
@@ -285,7 +342,7 @@ const onCut = (e: ClipboardEvent) => {
         return;
     e.preventDefault();
     e.clipboardData.setData('text/plain', bpStrLatest());
-    parseBp('');
+    clearBp();
 }
 
 const onPaste = (e: ClipboardEvent) => {
@@ -293,27 +350,30 @@ const onPaste = (e: ClipboardEvent) => {
         return;
     e.preventDefault();
     (e.target as HTMLElement).blur();
-    parseBp(e.clipboardData.getData('text/plain'));
+    openCode(e.clipboardData.getData('text/plain'));
 }
 
 const copy = async () => {
-    working.value = true;
+    busy.value = true;
     try {
         await navigator.clipboard.writeText(bpStrLatest());
     } catch {
         alert(t('复制粘贴不支持'));
     }
-    working.value = false;
+    busy.value = false;
 }
 
 const paste = async () => {
-    working.value = true;
+    busy.value = true;
+    let text = '';
     try {
-        parseBp(await navigator.clipboard.readText());
+        text = await navigator.clipboard.readText();
     } catch {
         alert(t('复制粘贴不支持'));
     }
-    working.value = false;
+    busy.value = false;
+    if (text)
+        await openCode(text);
 }
 
 const hotkey = (event: KeyboardEvent) => {
@@ -421,10 +481,6 @@ body {
         flex-direction: column;
     }
 
-    .error {
-        color: red;
-    }
-
     button,
     .button {
         color: inherit;
@@ -461,6 +517,16 @@ body {
     .bp-code {
         word-break: break-all;
     }
+}
+
+.lang-float {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    select { background: #121e30; color: #e6eefb; border: 1px solid #2a3f5c; border-radius: 6px; padding: 4px; }
 }
 
 ul.operations {
@@ -512,6 +578,8 @@ ul.operations {
         "复制粘贴不支持": "不支持，请手动复制",
         "保存文件": "保存文件",
 
+        "确认替换": "当前蓝图有未保存的修改，打开新蓝图会丢弃这些修改。继续吗？",
+        "侧边栏": "侧边栏",
         "批量替换": "批量替换",
         "撤销": "撤销",
         "重做": "重做",
@@ -525,6 +593,8 @@ ul.operations {
         "复制粘贴不支持": "Not supported, please copy manually",
         "保存文件": "Save File",
 
+        "确认替换": "The current blueprint has unsaved edits. Opening another one discards them. Continue?",
+        "侧边栏": "Sidebar",
         "批量替换": "Batch Replace",
         "撤销": "Undo",
         "重做": "Redo",
