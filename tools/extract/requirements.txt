@@ -1,0 +1,5 @@
+# Runtime dependencies of the extraction tool (Python 3.12).
+UnityPy==1.25.4
+TypeTreeGeneratorAPI==0.0.10
+# PNG bytes depend on the Pillow/zlib build; pinned so re-runs stay byte-identical.
+Pillow==13.0.0
