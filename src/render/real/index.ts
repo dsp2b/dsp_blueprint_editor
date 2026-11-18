@@ -1,12 +1,19 @@
 import { BufferGeometry, Camera, Group, Mesh, MeshBasicMaterial, Vector2, Vector3 } from 'three';
 import { BlueprintBuilding } from '@/blueprint/parser';
-import { noIconBuildings } from '@/data/building';
+import { buildingMeta, noIconBuildings } from '@/data/building';
+import { isBelt } from '@/data/items';
+import { itemIconId } from '@/data/icons';
+import { IconTexture } from '@/iconTexture';
+import { BeltTier, buildBeltPaths } from '../beltPath';
+import { inferCarriedItems } from '../carriedItems';
 import { buildingIconId } from '../core/badges';
 import { tierOf, TIER_COLORS } from '../core/tiers';
 import { createLinksLayer } from '../simple/links';
 import type { Layer, LayerContext } from '../layers';
 import { DEFAULT_LOD_DISTANCE, isModelBuilding, RealBuildings } from './buildings';
 import { BadgeItem, FloatingBadges } from './badges';
+import { RealBelts } from './belts';
+import { beltMetersPerSecond, CargoLane, RealCargo } from './cargo';
 import {
     GLTFLike, loadGlb as sharedLoadGlb, loadModelManifest, LoadGlb, LoadProgress, ModelJob, ModelManifest, ModelQueue, progressText,
 } from './loader';
@@ -32,6 +39,13 @@ export interface RealLayer extends Layer {
 const LOD_STEP = 0.5;
 /** 悬浮标记离模型顶部的高度 */
 const BADGE_LIFT = 1.2;
+/** 清单里没有 beltSpeed 时各等级的带速参数 */
+const BELT_SPEED: Record<BeltTier, number> = { 1: 1, 2: 2, 3: 5 };
+
+/** 清单 belts 段（mk1/mk2/mk3） */
+interface BeltManifest {
+    belts?: Record<string, { file: string, bytes: number }>;
+}
 
 // ───────── 顶部进度提示 ─────────
 
@@ -107,7 +121,7 @@ function defaultLang() {
 /**
  * 真实模型图层。build 时什么都不下载；第一次显示（选了真实模型）时才建立方盒占位、
  * 读取模型清单并逐类下载模型，到达的类型立即换掉方盒；隐藏（精简模式）时不再开始新的下载。
- * 传送带与分拣器暂用精简模式的画法。
+ * 传送带按等级下载游戏截面模型（到达前为等级色条带），带上画推断出的货物；分拣器暂用精简模式的画法。
  */
 export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLayer {
     const deps: RealLayerDeps = { loadGlb: sharedLoadGlb, loadManifest: loadModelManifest, concurrency: 4, ...overrides };
@@ -118,6 +132,10 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
     let disposed = false;
     let buildings: RealBuildings | null = null;
     let links: Layer | null = null;
+    let belts: RealBelts | null = null;
+    let cargo: RealCargo | null = null;
+    /** 每个等级的传送带在下载队列里用的键（该等级传送带的模型编号） */
+    const beltKeys = new Map<number, BeltTier>();
     let badges: FloatingBadges | null = null;
     let queue: ModelQueue | null = null;
     let manifest: 'idle' | 'loading' | 'failed' | 'ok' = 'idle';
@@ -134,7 +152,7 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
     let lodAt: Vector3 | null = null;
     const bufferSize = new Vector2();
 
-    const typeCount = () => buildings?.typeKeys().length ?? 0;
+    const typeCount = () => (buildings?.typeKeys().length ?? 0) + (belts?.tierKeys().length ?? 0);
 
     const progress = (): LoadProgress => {
         if (queue)
@@ -210,6 +228,22 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         };
     };
 
+    const beltJobFor = (m: ModelManifest & BeltManifest, tier: BeltTier): ModelJob | null => {
+        const entry = m.belts?.[`mk${tier}`];
+        const key = [...beltKeys].find(([, t]) => t === tier)?.[0];
+        if (!entry || key === undefined)
+            return null;
+        return {
+            key,
+            bytes: entry.bytes,
+            async load(onBytes) {
+                const gltf = await deps.loadGlb(entry.file, onBytes);
+                if (!disposed)
+                    belts?.attach(tier, gltf);
+            },
+        };
+    };
+
     const start = () => {
         if (manifest === 'loading' || manifest === 'ok' || !buildings || typeCount() === 0)
             return;
@@ -219,7 +253,10 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             if (disposed || !buildings)
                 return;
             manifest = 'ok';
-            const jobs = buildings.typeKeys().map(k => jobFor(m, k)).filter((j): j is ModelJob => j !== null);
+            const jobs = [
+                ...buildings.typeKeys().map(k => jobFor(m, k)),
+                ...(belts?.tierKeys() ?? []).map(t => beltJobFor(m, t)),
+            ].filter((j): j is ModelJob => j !== null);
             queue = new ModelQueue(jobs, { concurrency: deps.concurrency, onChange: updatePill });
             queue.setActive(visible);
             updatePill();
@@ -230,15 +267,42 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         });
     };
 
+    /** 带上的货物：每条路径按所属传送带推断出的物品画图标，按该等级带速移动 */
+    const buildCargo = (c: LayerContext, rb: RealBelts) => {
+        const items = inferCarriedItems(c.data);
+        const lanes: CargoLane[] = rb.paths.map((p, i) => {
+            const icons = new Map<number, number>();
+            for (const index of p.buildingIndices) {
+                const itemId = items.get(index);
+                if (itemId)
+                    icons.set(index, c.iconTexture.requestIcon(itemIconId(itemId)));
+            }
+            const modelIndex = c.buildings[p.buildingIndices[0]]?.modelIndex ?? -1;
+            const speed = buildingMeta.get(modelIndex)?.work?.beltSpeed ?? BELT_SPEED[p.tier];
+            return { tier: p.tier, rings: rb.rings[i], speed: beltMetersPerSecond(speed), icons };
+        });
+        cargo = new RealCargo(lanes, c.iconTexture.texture ?? null, new Vector2(IconTexture.WIDTH, IconTexture.HEIGHT));
+        c.root.add(cargo.group);
+    };
+
     /** 第一次显示时才建立（精简模式完全不付出代价） */
     const ensureBuilt = () => {
         if (buildings || !ctx)
             return;
         buildings = new RealBuildings(ctx);
         ctx.root.add(buildings.root);
+        const paths = buildBeltPaths(ctx.data, buildingMeta, ctx.transforms);
+        belts = new RealBelts(ctx, paths);
+        ctx.root.add(belts.root);
+        for (const b of ctx.buildings) {
+            if (isBelt(b.itemId) && ![...beltKeys.values()].includes((b.itemId - 2000) as BeltTier))
+                beltKeys.set(b.modelIndex, (b.itemId - 2000) as BeltTier);
+        }
+        buildCargo(ctx, belts);
+        // 分拣器暂用精简模式的弧线：给它一份去掉传送带的蓝图
         const linksRoot = new Group();
         links = createLinksLayer();
-        links.build({ ...ctx, root: linksRoot });
+        links.build({ ...ctx, root: linksRoot, data: { ...ctx.data, buildings: ctx.data.buildings.filter(b => !isBelt(b.itemId)) } });
         ctx.root.add(linksRoot);
         badges = new FloatingBadges(ctx.iconTexture.texture, ctx.buildings.filter(b => isModelBuilding(b) && !noIconBuildings.has(b.itemId)).length);
         ctx.root.add(badges.mesh);
@@ -248,6 +312,8 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         probe.onBeforeRender = (_r, _s, cam) => { camera = cam; };
         ctx.root.add(probe);
         buildings.setHighlight(mask);
+        belts.setHighlight(mask);
+        cargo?.setHighlight(mask);
         buildings.setHover(hovered);
         buildings.setSelected(selected);
         links.setHighlight?.(mask);
@@ -268,6 +334,9 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             updatePill();
         },
         modelShown(modelIndex) {
+            const tier = beltKeys.get(modelIndex);
+            if (tier !== undefined)
+                return belts?.shown(tier) ?? false;
             return buildings?.shown(modelIndex) ?? false;
         },
         build(c) {
@@ -277,6 +346,9 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             if (!visible || !ctx || !buildings)
                 return;
             links?.update(dt);
+            // view.flow 已合并"流向动画"设置与减少动态效果
+            belts?.update(dt, ctx.view.flow);
+            cargo?.update(dt, ctx.view.flow);
             // 编辑里改了配方：更新悬浮标记，并重新隐藏被更新回来的顶面图标
             for (const [b, iconId] of badgeIcon) {
                 const now = buildingIconId(b);
@@ -308,10 +380,15 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             pill?.el.remove();
             buildings?.dispose();
             links?.dispose();
+            belts?.dispose();
+            cargo?.dispose();
             badges?.dispose();
             probe?.geometry.dispose();
             (probe?.material as MeshBasicMaterial | undefined)?.dispose();
             buildings = links = badges = queue = pill = probe = null;
+            belts = null;
+            cargo = null;
+            beltKeys.clear();
             badgeIcon.clear();
             camera = null;
             ctx = null;
@@ -332,6 +409,8 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         setHighlight(m) {
             mask = m;
             buildings?.setHighlight(m);
+            belts?.setHighlight(m);
+            cargo?.setHighlight(m);
             links?.setHighlight?.(m);
             badges?.setDim(m);
         },
@@ -346,6 +425,8 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             links?.setSelected?.(selected);
         },
         modelOf(index) {
+            if (ctx && belts && isBelt(ctx.buildings[index]?.itemId ?? 0) && ctx.transforms[index])
+                return ctx.transforms[index][0].clone();
             return links?.modelOf?.(index) ?? null;
         },
     };
