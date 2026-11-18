@@ -67,6 +67,14 @@ export function isBattleBase(id: number) {
     return id === 3009;
 }
 
+export function isOrbitalCollector(id: number) {
+    return id === 2105;
+}
+
+export function isMarker(id: number) {
+    return id === 2401;
+}
+
 export function isDispenser(id: number) {
     return id === 2107;
 }

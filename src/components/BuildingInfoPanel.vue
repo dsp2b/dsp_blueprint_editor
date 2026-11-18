@@ -4,6 +4,8 @@
 
     <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
     <StationInfo v-if="isStation(building.itemId)" :building="building" />
+    <StationInfo v-if="isOrbitalCollector(building.itemId) && bParams && !(bParams as CollectorParameters).allZero" :building="building" />
+    <MarkerInfo v-if="isMarker(building.itemId) && bParams" :building="building" />
     <MonitorInfo v-if="isMonitor(building.itemId)" :building="building" />
     <BattleBaseInfo v-if="isBattleBase(building.itemId)" :building="building" />
     <StorageInfo v-if="isStorage(building.itemId)" :building="building" />
@@ -86,13 +88,13 @@ import { truth } from '@/utils';
 import {
     LabParamerters, AssembleParamerters, TankParameters, BlueprintBuilding,
     BeltParameters, InserterParameters, EjectorParameters,
-    EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters,
+    EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters, CollectorParameters,
 } from '@/blueprint/parser';
 import { itemIconId } from '@/data/icons';
 import {
     isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
     isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
-    isBattleBase, isDispenser,
+    isBattleBase, isDispenser, isOrbitalCollector, isMarker,
 } from '@/data/items';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
@@ -100,6 +102,7 @@ import { commandQueueKey } from '@/define';
 import BuildingRecipe from './BuildingRecipe.vue';
 import BuildingIcon from './BuildingIcon.vue';
 import StationInfo from './StationInfo.vue';
+import MarkerInfo from './MarkerInfo.vue';
 import MonitorInfo from './MonitorInfo.vue';
 import BattleBaseInfo from './BattleBaseInfo.vue';
 import StorageInfo from './StorageInfo.vue';
