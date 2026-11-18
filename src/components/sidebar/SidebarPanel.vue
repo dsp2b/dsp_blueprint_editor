@@ -24,7 +24,7 @@
                 <section v-show="activeTab === 'overview'" id="pane-overview" class="pane" role="tabpanel"
                          aria-labelledby="tab-overview" tabindex="0">
                     <slot name="overview">
-                        <BuildingOverview />
+                        <OverviewTab :data="data" />
                     </slot>
                 </section>
                 <section v-show="activeTab === 'building'" id="pane-building" class="pane" role="tabpanel"
@@ -47,7 +47,7 @@ import { useI18n } from 'vue-i18n';
 import type { BlueprintBuilding, BlueprintData } from '@/blueprint/parser';
 import { version } from '@/define';
 import SWStatus from '@/swStatus.vue';
-import BuildingOverview from '../BuildingOverview.vue';
+import OverviewTab from './OverviewTab.vue';
 import SidebarHeader from './SidebarHeader.vue';
 import BuildingTab from './BuildingTab.vue';
 import EditTab from './EditTab.vue';
@@ -196,7 +196,6 @@ const onTabKey = async (e: KeyboardEvent) => {
 .pane {
     padding: 16px 18px 28px;
     &:focus-visible { outline-offset: -2px; }
-    // 概览页暂时沿用旧的设施列表
     :deep(h2) { margin: 0 0 10px; font: 600 13px/1.4 var(--cjk); color: var(--muted); }
     :deep(h3:not(.detail-name)) { margin: 18px 0 8px; color: var(--muted); font-size: 13px; }
 }

@@ -3,16 +3,29 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 4l7 16 2-7 7-2z"/></svg>
         <p>{{ t('点一个建筑') }}</p>
     </div>
-    <BuildingInfoPanel v-else :key="building.index" :building="building" />
+    <template v-else>
+        <BuildingInfoPanel :key="`${building.index}:${recipeId}`" :building="building" />
+        <ProductionDetail :key="building.index" :building="building" />
+    </template>
 </template>
 
 <script setup lang="ts">
+import { computed, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BlueprintBuilding } from '@/blueprint/parser';
+import { commandQueueKey } from '@/define';
 import BuildingInfoPanel from '../BuildingInfoPanel.vue';
+import ProductionDetail from './ProductionDetail.vue';
 
-defineProps<{ building: BlueprintBuilding | null }>();
+const props = defineProps<{ building: BlueprintBuilding | null }>();
 const { t } = useI18n();
+
+const queue = inject(commandQueueKey)!.value;
+// 换配方后让参数面板里的配方图标刷新（建筑对象本身不是响应式的）
+const recipeId = computed(() => {
+    queue?.execVersion.value;
+    return props.building?.recipeId;
+});
 </script>
 
 <style lang="scss" scoped>
