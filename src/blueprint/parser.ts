@@ -25,6 +25,7 @@ export interface BlueprintBuilding {
     areaIndex: number,
     localOffset: [ XYZ, XYZ ],
     yaw: [ number, number ],
+    tilt: number,
     itemId: number,
     modelIndex: number,
     outputObjIdx: number,
@@ -766,12 +767,14 @@ const parameterParsers = new Map<number, ParamParser<AllParameters>>([
     [2316, advancedMiningMachineParamParser()],
     [2020, splitterParamParser],
     [2901, labParamParser],
+    [2902, labParamParser],
     [2001, beltParamParser],
     [2002, beltParamParser],
     [2003, beltParamParser],
     [2011, inserterParamParser],
     [2012, inserterParamParser],
     [2013, inserterParamParser],
+    [2014, inserterParamParser],
     [2101, storageParamParser(30)],
     [2102, storageParamParser(60)],
     [2106, tankParamParser],
@@ -784,7 +787,8 @@ const parameterParsers = new Map<number, ParamParser<AllParameters>>([
     [2107, dispenserParamParser],
 ]);
 for (const id of allAssemblers) {
-    parameterParsers.set(id, assembleParamParser);
+    if (!parameterParsers.has(id))
+        parameterParsers.set(id, assembleParamParser);
 }
 
 function parserFor(itemId: number) {
@@ -802,11 +806,14 @@ function importBuilding(r: BufferReader): BlueprintBuilding {
             z: r.getFloat32(),
         }
     }
+    const index = r.getInt32();
+    const v2 = index <= -100;
     const b: BlueprintBuilding = {
-        index: r.getInt32(),
+        index: v2 ? r.getInt32() : index,
         areaIndex: r.getInt8(),
         localOffset: [readXYZ(), readXYZ()],
         yaw: [r.getFloat32(), r.getFloat32()],
+        tilt: v2 ? r.getFloat32() : 0.0,
         itemId: r.getInt16(),
         modelIndex: r.getInt16(),
         outputObjIdx: r.getInt32(),
