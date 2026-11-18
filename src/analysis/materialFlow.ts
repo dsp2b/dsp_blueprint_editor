@@ -25,8 +25,8 @@ export interface FlowBuilding {
     recipeId: number;
 }
 
-/** recipeId: the recipe that moves most of this item, so the UI can highlight it in the view */
-export interface FlowLine { itemId: number; perMin: number; recipeId: number }
+/** recipeIds: every recipe that moves this item, most first, so the UI can highlight their buildings in the view */
+export interface FlowLine { itemId: number; perMin: number; recipeIds: number[] }
 export interface Balance { itemId: number; supply: number; demand: number }
 export interface Shortfall extends Balance {
     deficit: number;
@@ -41,6 +41,8 @@ export interface MaterialFlow {
     outputs: FlowLine[];
     intermediates: Balance[];
     shortfalls: Shortfall[];
+    /** intermediates with supply > demand (balanced ones are in neither list) */
+    surpluses: Balance[];
     mining: { count: number };
 }
 
@@ -62,7 +64,7 @@ export function analyzeMaterialFlow(buildings: FlowBuilding[], env: FlowEnv): Ma
     const demand = new Map<number, number>();
     // item -> producing building item -> { total per minute, buildings }
     const producers = new Map<number, Map<number, { perMin: number; count: number }>>();
-    // item -> recipe -> per minute, for the dominant recipe of In/Out lines
+    // item -> recipe -> per minute, for the recipes of In/Out lines
     const supplyBy = new Map<number, Map<number, number>>();
     const demandBy = new Map<number, Map<number, number>>();
     let mining = 0;
@@ -73,13 +75,8 @@ export function analyzeMaterialFlow(buildings: FlowBuilding[], env: FlowEnv): Ma
             m.set(id, inner = new Map());
         add(inner, recipeId, v);
     };
-    const dominant = (m: Map<number, Map<number, number>>, id: number) => {
-        let best = 0, bestV = -1;
-        for (const [r, v] of m.get(id)!)
-            if (v > bestV)
-                [best, bestV] = [r, v];
-        return best;
-    };
+    const recipesOf = (m: Map<number, Map<number, number>>, id: number) =>
+        [...m.get(id)!].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([r]) => r);
 
     for (const b of buildings) {
         const worker = env.worker(b.modelIndex);
@@ -113,17 +110,20 @@ export function analyzeMaterialFlow(buildings: FlowBuilding[], env: FlowEnv): Ma
     const outputs: FlowLine[] = [];
     const intermediates: Balance[] = [];
     const shortfalls: Shortfall[] = [];
+    const surpluses: Balance[] = [];
 
     for (const [itemId, d] of demand)
         if (!supply.has(itemId))
-            inputs.push({ itemId, perMin: d, recipeId: dominant(demandBy, itemId) });
+            inputs.push({ itemId, perMin: d, recipeIds: recipesOf(demandBy, itemId) });
     for (const [itemId, s] of supply) {
         const d = demand.get(itemId);
         if (d === undefined) {
-            outputs.push({ itemId, perMin: s, recipeId: dominant(supplyBy, itemId) });
+            outputs.push({ itemId, perMin: s, recipeIds: recipesOf(supplyBy, itemId) });
             continue;
         }
         intermediates.push({ itemId, supply: s, demand: d });
+        if (s > d + EPS)
+            surpluses.push({ itemId, supply: s, demand: d });
         if (s >= d - EPS)
             continue;
         let best: { itemId: number; perMin: number; count: number } | null = null;
@@ -142,6 +142,7 @@ export function analyzeMaterialFlow(buildings: FlowBuilding[], env: FlowEnv): Ma
     inputs.sort(byRate);
     outputs.sort(byRate);
     intermediates.sort((a, b) => b.demand - a.demand || a.itemId - b.itemId);
+    surpluses.sort((a, b) => (b.supply - b.demand) - (a.supply - a.demand) || a.itemId - b.itemId);
     shortfalls.sort((a, b) => b.deficit - a.deficit || a.itemId - b.itemId);
-    return { inputs, outputs, intermediates, shortfalls, mining: { count: mining } };
+    return { inputs, outputs, intermediates, shortfalls, surpluses, mining: { count: mining } };
 }

@@ -7,7 +7,7 @@
                 <ul class="list compact">
                     <li v-for="l of flow.inputs" :key="l.itemId">
                         <button type="button" class="row" :class="{ hl: active === key(l) }" :aria-pressed="active === key(l)"
-                                @click="emit('toggle', { recipeId: l.recipeId }, key(l))">
+                                @click="emit('toggle', { recipeIds: l.recipeIds }, key(l))">
                             <BuildingIcon :icon-id="itemIconId(l.itemId)" alt="" />
                             <span class="name">{{ itemName(l.itemId) }}</span>
                             <span class="num">{{ fmt(l.perMin) }}</span>
@@ -21,7 +21,7 @@
                 <ul class="list compact">
                     <li v-for="l of flow.outputs" :key="l.itemId">
                         <button type="button" class="row" :class="{ hl: active === key(l) }" :aria-pressed="active === key(l)"
-                                @click="emit('toggle', { recipeId: l.recipeId }, key(l))">
+                                @click="emit('toggle', { recipeIds: l.recipeIds }, key(l))">
                             <BuildingIcon :icon-id="itemIconId(l.itemId)" alt="" />
                             <span class="name">{{ itemName(l.itemId) }}</span>
                             <span class="num">{{ fmt(l.perMin) }}</span>
@@ -48,6 +48,16 @@
                 <p>{{ t('缺口建议', { amount: fmt(s.deficit), n: s.extraBuildings, building: itemName(s.producerItemId) }) }}</p>
             </div>
         </div>
+
+        <div v-if="flow.surpluses.length" class="surplus">
+            <div class="surplus-title">{{ t('中间产物富余') }}</div>
+            <div v-for="s of flow.surpluses" :key="s.itemId" class="bar-row">
+                <BuildingIcon :icon-id="itemIconId(s.itemId)" alt="" />
+                <span>{{ itemName(s.itemId) }}</span>
+                <div class="bar" role="img" :aria-label="t('需求占供应', { pct: Math.floor(s.demand / s.supply * 100) })"><i :style="{ width: Math.max(2, s.demand / s.supply * 100) + '%' }"></i></div>
+                <span class="bar-num">{{ fmt(s.supply) }} / {{ fmt(s.demand) }}</span>
+            </div>
+        </div>
     </template>
 </template>
 
@@ -66,7 +76,7 @@ const { t } = useI18n();
 
 const empty = computed(() => !props.flow.inputs.length && !props.flow.outputs.length
     && !props.flow.intermediates.length && !props.flow.mining.count);
-const key = (l: FlowLine) => `recipe:${l.recipeId}`;
+const key = (l: FlowLine) => `flow:${l.itemId}`;
 const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
 </script>
 
@@ -92,6 +102,8 @@ const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
 .bar-row { display: grid; grid-template-columns: 22px minmax(36px, auto) 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; margin: 6px 0 0; :deep(.icon) { width: 22px; height: 22px; } }
 .bar { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; i { display: block; height: 100%; background: var(--mk1); } }
 .bar-num { font: 12.5px var(--num); color: var(--muted); }
+.surplus { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); .bar i { background: var(--mk2); } }
+.surplus-title { font-size: 12px; color: var(--muted); }
 .short p { margin: 4px 0 10px; font-size: 12.5px; color: var(--muted); }
 .short:last-child p { margin-bottom: 0; }
 </style>
@@ -107,7 +119,9 @@ const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
         "采矿说明": "另有 {n} 台采矿设备，产量取决于矿脉，未计入。",
         "产能不够标题": "上游产能不够，下游设备跑不满",
         "供应占需求": "供应达到需求的 {pct}%",
-        "缺口建议": "每分钟缺 {amount}，再加 {n} 台{building}可满速运行。"
+        "缺口建议": "每分钟缺 {amount}，再加 {n} 台{building}可满速运行。",
+        "中间产物富余": "中间产物有富余（供应 / 需求，每分钟）",
+        "需求占供应": "需求是供应的 {pct}%"
     },
     "en": {
         "没有生产建筑": "No production building has a recipe set in this blueprint, so there is no material flow to show.",
@@ -118,7 +132,9 @@ const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
         "采矿说明": " {n} mining building(s) are left out because their output depends on the vein.",
         "产能不够标题": "Some inputs are short, so machines downstream cannot run at full speed",
         "供应占需求": "Supply is {pct}% of demand",
-        "缺口建议": "Short by {amount} per minute. Add {n} more {building} to run at full speed."
+        "缺口建议": "Short by {amount} per minute. Add {n} more {building} to run at full speed.",
+        "中间产物富余": "Intermediate products with spare supply (supply / demand per minute)",
+        "需求占供应": "Demand is {pct}% of supply"
     }
 }
 </i18n>

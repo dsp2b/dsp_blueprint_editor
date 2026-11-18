@@ -125,7 +125,8 @@ describe('buildBeltPaths', () => {
         expect(upOf(climbing).dot(forwardOf(climbing))).toBeCloseTo(0, 5);
     });
 
-    test('chain ends: no input/output gets caps; ends joined to a building slot do not', () => {
+    // CargoTraffic.AlterPathRenderer: every open path gets a start cap, and an end cap unless it outputs into another path
+    test('chain ends: open path starts and ends get caps, also where they join a building slot', () => {
         const station = building(0, 2103, STATION_MODEL, 0, 0);
         // 流入链：从北边往南流入 0 号槽（北侧）
         const into = [belt(1, 0, 4, 0, 2), belt(2, 0, 3, 0, 3), belt(3, 0, 2, 0, 0, { outputToSlot: 0 })];
@@ -138,9 +139,9 @@ describe('buildBeltPaths', () => {
         expect(paths).toHaveLength(2);
         const a = pathOf(paths, 1), b = pathOf(paths, 4);
         expect(a.buildingIndices).toEqual([1, 2, 3]);
-        expect([a.startCap, a.endCap]).toEqual([true, false]);
+        expect([a.startCap, a.endCap]).toEqual([true, true]);
         expect(b.buildingIndices).toEqual([4, 5, 6]);
-        expect([b.startCap, b.endCap]).toEqual([false, true]);
+        expect([b.startCap, b.endCap]).toEqual([true, true]);
         expectSpacing(a);
         expectSpacing(b);
     });
@@ -163,7 +164,7 @@ describe('buildBeltPaths', () => {
         expect(b.buildingIndices).toEqual([4, 5]);
         expect(a.points[a.points.length - 1].pos.distanceTo(slot0)).toBeLessThan(0.04);
         expect(b.points[0].pos.distanceTo(slot1)).toBeLessThan(0.04);
-        expect([a.endCap, b.startCap]).toEqual([false, false]);
+        expect([a.endCap, b.startCap]).toEqual([true, true]);
         expectSpacing(a);
         expectSpacing(b);
         // 进站方向朝西（指向站心），出站方向也朝西（离开站心）
@@ -181,7 +182,7 @@ describe('buildBeltPaths', () => {
         const slot0 = sc.clone().addScaledVector(north, 2.7).addScaledVector(sc.clone().normalize(), -0.01 + BELT_LIFT);
         expect(p.points[p.points.length - 1].pos.distanceTo(lifted(rootPos(bs[3])))).toBeLessThan(0.01);
         expect(Math.min(...p.points.map(q => q.pos.distanceTo(slot0)))).toBeLessThan(0.04);
-        expect(p.endCap).toBe(false);
+        expect(p.endCap).toBe(true);
     });
 
     test('a lone belt is a short capped stub along its yaw', () => {

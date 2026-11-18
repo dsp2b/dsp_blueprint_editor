@@ -79,3 +79,37 @@ def test_convert_is_idempotent(raw, tmp_path):
     first = {p.name: p.read_bytes() for p in (tmp_path / "d").iterdir()}
     run(*args)
     assert {p.name: p.read_bytes() for p in (tmp_path / "d").iterdir()} == first
+
+
+def _seed_models(raw):
+    (raw / "models/belt").mkdir(parents=True)
+    (raw / "models/65.glb").write_bytes(b"glTF-65")
+    (raw / "models/65.lod0.glb").write_bytes(b"glTF-65-lod0")
+    (raw / "models/belt/belt-mk1.glb").write_bytes(b"glTF-belt")
+    (raw / "models/manifest.json").write_text('{"buildings": {}}', encoding="utf-8")
+
+
+def test_convert_publishes_models_to_the_static_asset_dir(raw, tmp_path):
+    _seed_models(raw)
+    site = tmp_path / "public" / "models"
+    site.mkdir(parents=True)
+    (site / "stale.glb").write_bytes(b"old")
+    assert run("convert", "--raw", str(raw), "--models", str(site)) == 0
+    assert {p.relative_to(site).as_posix(): p.read_bytes() for p in site.rglob("*") if p.is_file()} == {
+        "65.glb": b"glTF-65", "65.lod0.glb": b"glTF-65-lod0", "belt/belt-mk1.glb": b"glTF-belt",
+        "manifest.json": b'{"buildings": {}}',
+    }
+
+
+def test_convert_models_needs_the_models_export(raw, tmp_path, capsys):
+    assert run("convert", "--raw", str(raw), "--models", str(tmp_path / "site")) != 0
+    assert "models" in capsys.readouterr().err
+    assert not (tmp_path / "site").exists()
+
+
+def test_convert_writes_preview_and_frontend_icons_in_one_pass(raw, tmp_path):
+    preview, frontend = tmp_path / "preview", tmp_path / "frontend"
+    assert run("convert", "--raw", str(raw), "--icons", str(preview), "--frontend-icons", str(frontend)) == 0
+    for d in (preview, frontend):
+        assert (d / "item_recipe" / "iron-ore.png").exists() and (d / "tech" / "1.png").exists()
+        assert (d / "signal" / "signal-501.png").exists()

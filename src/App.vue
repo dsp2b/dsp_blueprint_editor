@@ -34,6 +34,7 @@ import { useBlueprintSession } from '@/open/session';
 import { createWorkerParser, WorkerLike } from '@/open/workerParser';
 import { createRecentStore } from '@/open/recentStore';
 import { sessionKey } from '@/open/keys';
+import { pastedText } from '@/open/paste';
 import { browserStorage, createSettings, settingsKey } from '@/settings';
 import OpenCard from './components/open/OpenCard.vue';
 import OpenError from './components/open/OpenError.vue';
@@ -261,6 +262,19 @@ const hotkey = (event: KeyboardEvent) => {
 }
 onMounted(() => document.body.addEventListener('keydown', hotkey));
 onUnmounted(() => document.body.removeEventListener('keydown', hotkey));
+
+// 已打开蓝图时在页面上粘贴：替换当前蓝图（有未保存的修改先确认）；空状态由卡片的输入框处理
+const onPagePaste = (e: ClipboardEvent) => {
+    if (!data.value || working.value)
+        return;
+    const text = pastedText(e);
+    if (text === null)
+        return;
+    e.preventDefault();
+    session.open(text);
+}
+onMounted(() => document.addEventListener('paste', onPagePaste));
+onUnmounted(() => document.removeEventListener('paste', onPagePaste));
 </script>
 
 <style lang="scss">

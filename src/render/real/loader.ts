@@ -221,17 +221,13 @@ export class ModelQueue {
 
 const mb = (bytes: number) => (bytes / 1e6).toFixed(1);
 
+/** vue-i18n 的 t(key, named[, plural])；文案见 messages.ts */
+export type Translate = (key: string, named: Record<string, unknown>, plural?: number) => string;
+
 /** 进度提示的文字：下载中显示完成数与 MB，有失败时说明失败的类型数 */
-export function progressText(p: LoadProgress, lang: 'zh' | 'en') {
-    const loading = p.done + p.failed < p.total;
-    if (lang === 'zh') {
-        if (!loading)
-            return `${p.failed} 种建筑模型下载失败，仍显示为方盒`;
-        const base = `正在下载建筑模型 ${p.done}/${p.total}（${mb(p.loadedBytes)} / ${mb(p.totalBytes)} MB）`;
-        return p.failed ? `${base}，${p.failed} 种失败` : base;
-    }
-    if (!loading)
-        return `${p.failed} building model${p.failed === 1 ? '' : 's'} failed to download and ${p.failed === 1 ? 'stays a box' : 'stay boxes'}`;
-    const base = `Downloading building models ${p.done}/${p.total} (${mb(p.loadedBytes)} / ${mb(p.totalBytes)} MB)`;
-    return p.failed ? `${base}, ${p.failed} failed` : base;
+export function progressText(p: LoadProgress, t: Translate) {
+    if (p.done + p.failed >= p.total)
+        return t('modelPill.failed', { failed: p.failed }, p.failed);
+    const named = { done: p.done, total: p.total, failed: p.failed, loaded: mb(p.loadedBytes), size: mb(p.totalBytes) };
+    return t(p.failed ? 'modelPill.loadingFailed' : 'modelPill.loading', named);
 }

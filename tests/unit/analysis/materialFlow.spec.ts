@@ -45,8 +45,8 @@ describe('analyzeMaterialFlow', () => {
 
     it('classifies consumed-only as In and produced-only as Out', () => {
         const r = analyzeMaterialFlow([b(SMELTER, 1), b(ASSEMBLER, 5)], env);
-        expect(r.inputs).toEqual([{ itemId: ORE, perMin: 60, recipeId: 1 }]);
-        expect(r.outputs).toEqual([{ itemId: GEAR, perMin: 60, recipeId: 5 }]);
+        expect(r.inputs).toEqual([{ itemId: ORE, perMin: 60, recipeIds: [1] }]);
+        expect(r.outputs).toEqual([{ itemId: GEAR, perMin: 60, recipeIds: [5] }]);
         expect(r.shortfalls).toEqual([]);
     });
 
@@ -76,10 +76,22 @@ describe('analyzeMaterialFlow', () => {
         expect(r.shortfalls[0].extraBuildings).toBe(2);
     });
 
-    it('shows nothing for balanced or surplus items', () => {
+    it('lists a surplus intermediate for its supply/demand bar, without a warning', () => {
         const r = analyzeMaterialFlow([b(SMELTER, 1), b(SMELTER, 1), b(ASSEMBLER, 5)], env);
         expect(r.shortfalls).toEqual([]);
         expect(r.intermediates).toEqual([{ itemId: PLATE, supply: 120, demand: 60 }]);
+        expect(r.surpluses).toEqual([{ itemId: PLATE, supply: 120, demand: 60 }]);
+    });
+
+    it('shows nothing for balanced intermediates', () => {
+        const r = analyzeMaterialFlow([b(SMELTER, 1), b(ASSEMBLER, 5)], env);
+        expect(r.shortfalls).toEqual([]);
+        expect(r.surpluses).toEqual([]);
+    });
+
+    it('does not list a shortfall as a surplus', () => {
+        const r = analyzeMaterialFlow([b(SMELTER, 1), b(ASSEMBLER, 5, 20), b(ASSEMBLER, 5, 30)], env);
+        expect(r.surpluses).toEqual([]);
     });
 
     it('picks the producer type that supplies the most for the extra-building count', () => {
@@ -91,22 +103,22 @@ describe('analyzeMaterialFlow', () => {
         expect(r.shortfalls[0].extraBuildings).toBe(2);
     });
 
-    it('names the recipe that moves the most of an In/Out item (for highlighting)', () => {
+    it('names every recipe that moves an In/Out item, most first (for highlighting)', () => {
         // two recipe-9 smelters move more ore and plates than one recipe-1 smelter
         const r = analyzeMaterialFlow([b(SMELTER, 9), b(SMELTER, 9), b(SMELTER, 1)], env);
-        expect(line(r.inputs, ORE)).toEqual({ itemId: ORE, perMin: 140, recipeId: 9 });
-        expect(line(r.outputs, PLATE)).toEqual({ itemId: PLATE, perMin: 220, recipeId: 9 });
+        expect(line(r.inputs, ORE)).toEqual({ itemId: ORE, perMin: 140, recipeIds: [9, 1] });
+        expect(line(r.outputs, PLATE)).toEqual({ itemId: PLATE, perMin: 220, recipeIds: [9, 1] });
     });
 
     it('excludes mining buildings and counts them', () => {
         const r = analyzeMaterialFlow([b(MINER), b(MINER), b(SMELTER, 1)], env);
         expect(r.mining.count).toBe(2);
         expect(line(r.outputs, ORE)).toBeUndefined();
-        expect(r.inputs).toEqual([{ itemId: ORE, perMin: 60, recipeId: 1 }]);
+        expect(r.inputs).toEqual([{ itemId: ORE, perMin: 60, recipeIds: [1] }]);
     });
 
     it('ignores buildings without a known recipe or worker', () => {
         const r = analyzeMaterialFlow([b(ASSEMBLER, 0), b(ASSEMBLER, 999), b(7777, 1)], env);
-        expect(r).toEqual({ inputs: [], outputs: [], intermediates: [], shortfalls: [], mining: { count: 0 } });
+        expect(r).toEqual({ inputs: [], outputs: [], intermediates: [], shortfalls: [], surpluses: [], mining: { count: 0 } });
     });
 });

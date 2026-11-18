@@ -178,7 +178,7 @@ def test_requires_a_source_and_out(game, tmp_path):
 
 def test_subcommand_packages_are_discovered(monkeypatch):
     names = [m.__name__ for m in cli.discover_subcommand_modules()]
-    assert names == ["tools.extract.convert", "tools.extract.models"]
+    assert names == ["tools.extract.convert", "tools.extract.models", "tools.extract.update"]
 
 
 def test_registered_subcommand_is_dispatched(monkeypatch, tmp_path):

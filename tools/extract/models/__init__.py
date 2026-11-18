@@ -22,28 +22,36 @@ def make_game(reader, source, log):
 
 
 def handler(args, ctx):
-    from .export import export_models, write_models
-    from .validation import validate_glbs
     if args.out is None:
         raise ExtractError("models needs --out DIR (the directory holding raw/<version>/)")
     with ctx.open_source(args) as source:
-        check_required_files(source)
-        reader = ctx.reader_factory(source, ctx.log)
-        try:
-            version = check_version(reader.version())
-            raw_dir = args.out / "raw" / version
-            buildings = raw_dir / "buildings.json"
-            if not buildings.is_file():
-                raise ExtractError(f"{buildings} not found; run the raw extraction for {version} first")
-            models = json.loads(buildings.read_bytes())["models"]
-            files = export_models(make_game(reader, source, ctx.log), models, ctx.log)
-        finally:
-            close = getattr(reader, "close", None)
-            if close:
-                close()
+        version, target, count = export_into_raw(source, ctx, args.out, args.skip_validate)
+    print(f"DSP game version: {version}\nwrote {count} GLB files to {target}")
+    return 0
+
+
+def export_into_raw(source, ctx, out, skip_validate=False):
+    """Export every model from `source` into out/raw/<version>/models/ (validated unless skip_validate).
+    -> (version, models directory, number of GLB files). Shared with the `update` subcommand."""
+    from .export import export_models, write_models
+    from .validation import validate_glbs
+    check_required_files(source)
+    reader = ctx.reader_factory(source, ctx.log)
+    try:
+        version = check_version(reader.version())
+        raw_dir = out / "raw" / version
+        buildings = raw_dir / "buildings.json"
+        if not buildings.is_file():
+            raise ExtractError(f"{buildings} not found; run the raw extraction for {version} first")
+        models = json.loads(buildings.read_bytes())["models"]
+        files = export_models(make_game(reader, source, ctx.log), models, ctx.log)
+    finally:
+        close = getattr(reader, "close", None)
+        if close:
+            close()
 
     def stage(directory):
-        if args.skip_validate:
+        if skip_validate:
             return
         bad = [r for r in validate_glbs(sorted(directory.rglob("*.glb"))) if r["errors"] or r["warnings"]]
         if bad:
@@ -51,5 +59,4 @@ def handler(args, ctx):
                                                                        f"{r['messages'][:2]}" for r in bad[:10]))
 
     target = write_models(raw_dir, files, stage)
-    print(f"DSP game version: {version}\nwrote {sum(f.endswith('.glb') for f in files)} GLB files to {target}")
-    return 0
+    return version, target, sum(f.endswith(".glb") for f in files)

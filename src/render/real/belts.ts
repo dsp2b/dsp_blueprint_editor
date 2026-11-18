@@ -283,8 +283,8 @@ export interface CapPlacement {
 const FLIP = new Matrix4().makeRotationZ(Math.PI);
 
 /**
- * 悬空的端头放端头模型（CargoTraffic.AlterPathRenderer）：起点转 180°，终点照路径朝向；
- * 整条带只有一节时用短端头，否则用长端头。
+ * 路径端头放端头模型（CargoTraffic.AlterPathRenderer）：起点转 180°，终点照路径朝向；
+ * 整条带只有一节（游戏 pathLength ≤ 10）时用短端头，否则用长端头。
  */
 export function capPlacements(path: BeltPath): CapPlacement[] {
     const pts = path.points;

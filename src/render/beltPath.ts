@@ -40,9 +40,9 @@ export interface BeltPoint {
 export interface BeltPath {
     tier: BeltTier;
     points: BeltPoint[];
-    /** 起点是悬空的端头（没有上游传送带，也没接建筑） */
+    /** 起点放端头：不闭合的链的起点都有（CargoTraffic.AlterPathRenderer，接建筑槽位的一端也有） */
     startCap: boolean;
-    /** 终点是悬空的端头（没有下游传送带，也没接建筑） */
+    /** 终点放端头：不闭合且没有汇入另一条带（游戏 outputPath == null），接建筑槽位的一端也有 */
     endCap: boolean;
     /** 路径经过的传送带建筑 index，按流向排列 */
     buildingIndices: number[];
@@ -349,10 +349,6 @@ export function buildBeltPaths(
         // 游戏 (x, y 上, z 前) -> 本项目建筑局部 (x, y 前, z 上)，与 unitBoxTrans 相同
         return new Vector3(pose.pos[0], pose.pos[2], pose.pos[1]).applyMatrix4(transforms[slotOf.get(buildingIndex)!][0]);
     };
-    const linksBuilding = (index: number) => {
-        const b = buildingAt(index);
-        return b !== null && !isBelt(b.itemId);
-    };
     const axis = (node: Node, column: 0 | 1) => new Vector3().setFromMatrixColumn(node.trans, column).normalize();
 
     interface Plan {
@@ -364,8 +360,6 @@ export function buildBeltPaths(
         trimStart: boolean;
         trimEnd: boolean;
         merge: Node | null;
-        connectedIn: boolean;
-        connectedOut: boolean;
     }
     const plans = new Map<number, Plan>();
     for (const node of nodes.values()) {
@@ -401,8 +395,6 @@ export function buildBeltPaths(
             trimStart: !prev,
             trimEnd: !next,
             merge: out && !succ(node) ? out : null,
-            connectedIn: main !== null || linksBuilding(b.inputObjIdx),
-            connectedOut: out !== null || linksBuilding(b.outputObjIdx),
         });
     }
     // 第一遍：每节的基本弧线（侧向汇入需要目标 pivot 的位置与朝向）
@@ -440,7 +432,6 @@ export function buildBeltPaths(
 
     const paths: BeltPath[] = [];
     for (const chain of chains) {
-        const first = plans.get(chain.nodes[0].index)!;
         const last = plans.get(chain.nodes[chain.nodes.length - 1].index)!;
         const lists = chain.nodes.map(n => samples.get(n.index)!);
         if (chain.closed)  // 首尾闭合
@@ -450,7 +441,7 @@ export function buildBeltPaths(
             const index = chain.nodes[i].index;
             const tier = (buildingAt(index)!.itemId - 2000) as BeltTier;
             if (!group || group.tier !== tier) {
-                group = { tier, points: [], startCap: i === 0 && !chain.closed && !first.connectedIn, endCap: false, buildingIndices: [] };
+                group = { tier, points: [], startCap: i === 0 && !chain.closed, endCap: false, buildingIndices: [] };
                 paths.push(group);
             }
             group.buildingIndices.push(index);
@@ -460,7 +451,7 @@ export function buildBeltPaths(
             }
         }
         if (group)
-            group.endCap = !chain.closed && !last.connectedOut;
+            group.endCap = !chain.closed && last.merge === null;
     }
     return paths;
 }

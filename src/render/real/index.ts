@@ -14,8 +14,9 @@ import { BadgeItem, FloatingBadges } from './badges';
 import { RealBelts } from './belts';
 import { beltMetersPerSecond, CargoLane, RealCargo } from './cargo';
 import {
-    GLTFLike, loadGlb as sharedLoadGlb, loadModelManifest, LoadGlb, LoadProgress, ModelJob, ModelManifest, ModelQueue, progressText,
+    GLTFLike, loadGlb as sharedLoadGlb, loadModelManifest, LoadGlb, LoadProgress, ModelJob, ModelManifest, ModelQueue, progressText, Translate,
 } from './loader';
+import { modelPillMessages } from './messages';
 import { RealSorters, SORTER_TIER_OF_MODEL, SorterManifestEntry } from './sorters';
 
 export interface RealLayerDeps {
@@ -23,8 +24,8 @@ export interface RealLayerDeps {
     loadManifest: () => Promise<ModelManifest>;
     /** 同时下载的类型数 */
     concurrency: number;
-    /** 进度提示的语言；不给时跟随界面语言 */
-    lang?: () => 'zh' | 'en';
+    /** 进度提示的翻译函数；不给时用全局 vue-i18n（跟随界面语言） */
+    t?: Translate;
 }
 
 export interface RealLayer extends Layer {
@@ -110,17 +111,15 @@ class ProgressPill {
     }
 }
 
-let uiLang: () => 'zh' | 'en' = () => 'zh';
-let uiLangRequested = false;
-/** 界面语言（vue-i18n 的当前语言）；第一次调用时异步取得 */
-function defaultLang() {
-    if (!uiLangRequested && typeof navigator !== 'undefined') {
-        uiLangRequested = true;
-        import('@/i18n').then(m => {
-            uiLang = () => String(m.default.global.locale.value).startsWith('zh') ? 'zh' : 'en';
-        }, () => { /* 保持默认 */ });
-    }
-    return uiLang();
+let globalT: Promise<Translate> | null = null;
+/** 全局 vue-i18n 的 t，并把进度提示的文案合并进去（异步取得：纯模块测试里不加载 vue-i18n 实例） */
+function globalTranslate() {
+    return globalT ??= import('@/i18n').then(m => {
+        const g = m.default.global;
+        for (const [lang, messages] of Object.entries(modelPillMessages))
+            g.mergeLocaleMessage(lang, messages);
+        return ((key, named, plural) => plural === undefined ? g.t(key, named) : g.t(key, named, plural)) as Translate;
+    });
 }
 
 /**
@@ -131,7 +130,7 @@ function defaultLang() {
  */
 export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLayer {
     const deps: RealLayerDeps = { loadGlb: sharedLoadGlb, loadManifest: loadModelManifest, concurrency: 4, ...overrides };
-    const lang = deps.lang ?? defaultLang;
+    let t: Translate | null = deps.t ?? null;
 
     let ctx: LayerContext | null = null;
     let visible = false;
@@ -179,8 +178,9 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
             pill.hide();
             return;
         }
-        const l = lang();
-        pill.show(progressText(p, l), !busy && p.failed > 0, l === 'zh' ? '重试' : 'Retry');
+        if (!t)
+            return;
+        pill.show(progressText(p, t), !busy && p.failed > 0, t('modelPill.retry', {}));
     };
 
     /** 显示模式下隐藏已换模型的建筑的顶面图标（改用悬浮标记），精简模式下恢复 */
@@ -338,8 +338,11 @@ export function createRealLayer(overrides: Partial<RealLayerDeps> = {}): RealLay
         buildings.setHover(hovered);
         buildings.setSelected(selected);
         sorters.setHighlight(mask);
-        if (typeof document !== 'undefined')
+        if (typeof document !== 'undefined') {
             pill = new ProgressPill(() => layer.retry());
+            if (!t)
+                globalTranslate().then(fn => { t = fn; updatePill(); }, e => console.warn('i18n unavailable', e));
+        }
     };
 
     const layer: RealLayer = {

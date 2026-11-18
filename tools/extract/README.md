@@ -37,6 +37,19 @@ tools/extract/.venv/bin/python -m tools.extract --remote rdp-ssh --out tools/ext
 #   --remote-game-dir "D:/SteamLibrary/steamapps/common/Dyson Sphere Program"
 ```
 
+After a game update, one command regenerates everything: the raw extraction, the GLB export and the
+conversion into every consumer (each destination is optional; give the ones to write):
+
+```sh
+tools/extract/.venv/bin/python -m tools.extract --remote rdp-ssh --out tools/extract/out update \
+  --preview-data src/data --locales src/locales --icons src/assets/icons --models public/models \
+  --go-data ../dsp2b-go/data --frontend-data ../dsp2b-frontend/app/services \
+  --frontend-icons ../dsp2b-frontend/public/images/icons
+```
+
+The steps also run on their own: the bare command (raw extraction), `models` (GLB export into
+`raw/<version>/models/`) and `convert` (same destination options as `update`, from an existing raw directory).
+
 The remote mode only reads the game directory. It pulls just the byte ranges it needs (about
 110 MB, gzip-compressed in transit, about 3 minutes) through a scratch directory
 `%TEMP%\dsp-extract-<guid>` on the remote machine. That directory is deleted when the run
@@ -71,5 +84,5 @@ Re-running against the same game version replaces the directory with byte-identi
   icons) and the sparse-file prefetching used for remote reads.
 - `buildings.py`: SlotConfig, tint and work parameters, mirroring `PrefabDesc`.
 - `raw.py`: the pipeline and atomic output writing. `cli.py`: argument parsing.
-- `models/`, `convert/`: subcommand packages. Each exposes `register(subparsers)`, which is
+- `models/`, `convert/`, `update/` (all three steps in one run): subcommand packages. Each exposes `register(subparsers)`, which is
   discovered automatically. The handler contract is described in `cli.py`.

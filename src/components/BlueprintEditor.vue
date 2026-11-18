@@ -697,9 +697,12 @@ defineExpose({
 			display: none;
 		}
 	}
+	// 图例移到左上角（右上角是截图按钮）
 	.legend {
-		right: 10px;
-		bottom: calc(var(--sheet-peek) + 56px);
+		left: 10px;
+		top: 10px;
+		right: auto;
+		bottom: auto;
 	}
 }
 </style>

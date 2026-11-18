@@ -7,7 +7,9 @@ import { buildingMeta } from "@/data/building";
 import { isBelt, isInserter, itemsMap } from "@/data/items";
 import { IconGeometry } from "@/icons";
 import { IconTexture } from "@/iconTexture";
-import { createGlbLoader, GLTFLike, LoadProgress, ModelJob, ModelManifest, ModelQueue, progressText } from "@/render/real/loader";
+import { createI18n } from "vue-i18n";
+import { createGlbLoader, GLTFLike, LoadProgress, ModelJob, ModelManifest, ModelQueue, progressText, Translate } from "@/render/real/loader";
+import { modelPillMessages } from "@/render/real/messages";
 import { cullOverlaps } from "@/render/real/badges";
 import { createRealLayer } from "@/render/real";
 import type { LayerContext } from "@/render/layers";
@@ -161,23 +163,34 @@ describe('createGlbLoader', () => {
     });
 });
 
-describe('progressText', () => {
+describe('progressText (copy goes through vue-i18n)', () => {
     const p = (o: Partial<LoadProgress>): LoadProgress => ({ done: 0, total: 0, failed: 0, loadedBytes: 0, totalBytes: 0, ...o });
+    const i18n = createI18n({ legacy: false, locale: 'zh', messages: modelPillMessages });
+    const tr = (lang: 'zh' | 'en'): Translate => (key, named, plural) => {
+        i18n.global.locale.value = lang;
+        return plural === undefined ? i18n.global.t(key, named) : i18n.global.t(key, named, plural);
+    };
 
     it('shows done/total types and MB', () => {
-        expect(progressText(p({ done: 2, total: 4, loadedBytes: 400_000, totalBytes: 1_100_000 }), 'zh'))
+        expect(progressText(p({ done: 2, total: 4, loadedBytes: 400_000, totalBytes: 1_100_000 }), tr('zh')))
             .toBe('正在下载建筑模型 2/4（0.4 / 1.1 MB）');
-        expect(progressText(p({ done: 2, total: 4, loadedBytes: 400_000, totalBytes: 1_100_000 }), 'en'))
+        expect(progressText(p({ done: 2, total: 4, loadedBytes: 400_000, totalBytes: 1_100_000 }), tr('en')))
             .toBe('Downloading building models 2/4 (0.4 / 1.1 MB)');
     });
 
     it('names the failed count', () => {
-        expect(progressText(p({ done: 3, total: 4, failed: 1, loadedBytes: 1e6, totalBytes: 1.1e6 }), 'zh'))
+        expect(progressText(p({ done: 3, total: 4, failed: 1, loadedBytes: 1e6, totalBytes: 1.1e6 }), tr('zh')))
             .toBe('1 种建筑模型下载失败，仍显示为方盒');
-        expect(progressText(p({ done: 1, total: 4, failed: 1, loadedBytes: 1e5, totalBytes: 1.1e6 }), 'zh'))
+        expect(progressText(p({ done: 1, total: 4, failed: 1, loadedBytes: 1e5, totalBytes: 1.1e6 }), tr('zh')))
             .toBe('正在下载建筑模型 1/4（0.1 / 1.1 MB），1 种失败');
-        expect(progressText(p({ done: 3, total: 4, failed: 1, loadedBytes: 1e6, totalBytes: 1.1e6 }), 'en'))
+        expect(progressText(p({ done: 3, total: 4, failed: 1, loadedBytes: 1e6, totalBytes: 1.1e6 }), tr('en')))
             .toBe('1 building model failed to download and stays a box');
+        expect(progressText(p({ done: 2, total: 4, failed: 2, loadedBytes: 1e6, totalBytes: 1.1e6 }), tr('en')))
+            .toBe('2 building models failed to download and stay boxes');
+        expect(progressText(p({ done: 1, total: 4, failed: 1, loadedBytes: 1e5, totalBytes: 1.1e6 }), tr('en')))
+            .toBe('Downloading building models 1/4 (0.1 / 1.1 MB), 1 failed');
+        expect(tr('en')('modelPill.retry', {})).toBe('Retry');
+        expect(tr('zh')('modelPill.retry', {})).toBe('重试');
     });
 });
 

@@ -36,7 +36,7 @@ describe('gameEnv with generated data', () => {
     // assembler Mk.I/II/III = 0.75x/1x/1.5x; gear recipe is 1 s -> 45/60/90 per minute
     it.each([[65, 45], [66, 60], [67, 90]])('assembler model %i makes %f gears/min', (modelIndex, perMin) => {
         const r = analyzeMaterialFlow([{ itemId: 2303, modelIndex, recipeId: 5 }], gameEnv);
-        expect(r.outputs).toEqual([{ itemId: 1201, perMin, recipeId: 5 }]);
+        expect(r.outputs).toEqual([{ itemId: 1201, perMin, recipeIds: [5] }]);
     });
     it('treats a smelter, a lab and the miners as expected', () => {
         expect(gameEnv.worker(194)).toEqual({ kind: 'craft', speed: 2 });

@@ -1,10 +1,12 @@
 """`convert` subcommand: raw extraction directory -> every consumer's data format.
 
     python -m tools.extract --out DIR convert [--raw DIR/raw/<version>] [--preview-data src/data]
-        [--locales src/locales] [--icons src/assets/icons] [--go-data ../dsp2b-go/data]
-        [--frontend-data ../dsp2b-frontend/app/services] [--report FILE]
+        [--locales src/locales] [--icons src/assets/icons] [--models public/models] [--go-data ../dsp2b-go/data]
+        [--frontend-data ../dsp2b-frontend/app/services] [--frontend-icons ../dsp2b-frontend/public/images/icons]
+        [--report FILE]
 
-Only the destinations that are given get written. Everything is generated before anything is written. Existing
+Only the destinations that are given get written. Everything is generated before anything is written. --models makes
+the static asset directory an exact copy of raw/<version>/models/ (written by the `models` subcommand). Existing
 dsp2b-go / frontend ProtoSet files are compared with the regenerated ones before they are replaced; the
 differences are printed (and written to --report as JSON).
 """
@@ -31,15 +33,32 @@ def register(subparsers):
     p = subparsers.add_parser("convert", help="convert a raw extraction into the consumers' data formats")
     p.add_argument("--raw", type=Path, metavar="DIR",
                    help="raw directory <out>/raw/<version> (default: the newest one under --out)")
+    add_destination_args(p)
+    p.set_defaults(func=handler)
+
+
+DESTINATIONS = ("preview_data", "locales", "icons", "models", "go_data", "frontend_data", "frontend_icons")
+
+
+def add_destination_args(p):
     p.add_argument("--preview-data", type=Path, metavar="DIR",
                    help="write itemsData/recipesData/midi/signalIconsData/techIconsData/building .ts here (src/data)")
     p.add_argument("--locales", type=Path, metavar="DIR",
                    help="write zh.json/en.json here (src/locales); its existing zh.json keys are kept as extras")
-    p.add_argument("--icons", type=Path, metavar="DIR", help="copy item_recipe/tech/signal icons here")
+    p.add_argument("--icons", type=Path, metavar="DIR", help="copy item_recipe/tech/signal icons here (src/assets/icons)")
+    p.add_argument("--models", type=Path, metavar="DIR",
+                   help="publish the GLB models and their manifest.json here (public/models); stale files are removed")
     p.add_argument("--go-data", type=Path, metavar="DIR", help="write dsp2b-go data/*ProtoSet.json here")
     p.add_argument("--frontend-data", type=Path, metavar="DIR", help="write dsp2b-frontend *ProtoSet.json here")
+    p.add_argument("--frontend-icons", type=Path, metavar="DIR",
+                   help="copy item_recipe/tech/signal icons here (dsp2b-frontend public/images/icons)")
     p.add_argument("--report", type=Path, metavar="FILE", help="write the full compatibility report as JSON")
-    p.set_defaults(func=handler)
+
+
+def require_destination(args):
+    if not any(getattr(args, d) for d in DESTINATIONS):
+        raise ExtractError("no destination: pass at least one of --preview-data, --locales, --icons, --models, "
+                           "--go-data, --frontend-data, --frontend-icons")
 
 
 def _load_json(path):
@@ -74,11 +93,15 @@ def _plan_icons(raw, dest):
     return files
 
 
+def _plan_models(raw, dest):
+    src = raw.path / "models"
+    if not (src / "manifest.json").is_file():
+        raise ExtractError(f"{src} has no models; run the `models` subcommand for {raw.version} first")
+    return {dest / p.relative_to(src): p.read_bytes() for p in sorted(src.rglob("*")) if p.is_file()}
+
+
 def handler(args, ctx):
-    targets = (args.preview_data, args.locales, args.icons, args.go_data, args.frontend_data)
-    if not any(targets):
-        raise ExtractError("no destination: pass at least one of --preview-data, --locales, --icons, "
-                           "--go-data, --frontend-data")
+    require_destination(args)
     raw_dir = args.raw or find_latest_raw(args.out) if (args.raw or args.out) else None
     if raw_dir is None:
         raise ExtractError("pass --raw DIR or --out DIR (the directory holding raw/<version>)")
@@ -99,8 +122,19 @@ def handler(args, ctx):
             files[args.locales / f"{lang}.json"] = json.dumps(table, ensure_ascii=False, indent=4).encode("utf-8")
     if args.icons:
         files.update(_plan_icons(raw, args.icons))
+    if args.frontend_icons:
+        files.update(_plan_icons(raw, args.frontend_icons))
+    stale = []
+    if args.models:
+        planned = _plan_models(raw, args.models)
+        files.update(planned)
+        if args.models.is_dir():
+            stale = [p for p in sorted(args.models.rglob("*")) if p.is_file() and p not in planned]
 
     written = 0
+    for path in stale:
+        path.unlink()
+        written += 1
     for path, data in files.items():
         if path.exists() and path.read_bytes() == data:
             continue
