@@ -1,0 +1,105 @@
+// 视觉基调：深空蓝底、全息青交互色，游戏 Mk.I/II/III 档位色是唯一的数据色。
+// 不加载 Web 字体，数字用 DIN 类系统字体。
+:root {
+    --void: #0E1726;
+    --deep: #08101B;
+    --panel: #121E30;
+    --panel-2: #192940;
+    --panel-3: #22354F;
+    --line: #2A3F5C;
+    --line-2: #3B5578;
+    --text: #DCE8F5;
+    --muted: #8BA0B8;
+    --faint: #5C7088;
+    --holo: #7FD8FF;
+    --holo-ink: #06233A;
+    --mk1: #E3A263;
+    --mk2: #51A896;
+    --mk3: #61A5D7;
+    --danger: #FF7A6B;
+    --num: "DIN Alternate", "Bahnschrift", "DIN 2014", "Roboto Condensed", system-ui, sans-serif;
+    --cjk: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    --code: "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --side: 384px;
+    --sheet-h: 78vh;
+    --sheet-peek: 148px;
+}
+
+html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--void);
+    color: var(--text);
+    font: 14px/1.5 var(--cjk);
+    overflow: hidden;
+}
+
+:focus-visible {
+    outline: 2px solid var(--holo);
+    outline-offset: 2px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 13.5px;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+
+    &:hover:not([disabled]) { background: var(--panel-3); }
+    &.primary {
+        background: var(--holo);
+        border-color: var(--holo);
+        color: var(--holo-ink);
+        font-weight: 600;
+        &:hover:not([disabled]) { background: #A3E4FF; }
+    }
+    &.ghost { background: transparent; }
+    &[disabled] { opacity: .45; cursor: default; }
+    svg { width: 16px; height: 16px; flex: none; }
+}
+
+.icon-btn {
+    width: 36px;
+    padding: 0;
+}
+
+// 共用弹窗（ModalDSP：批量替换、图标/配方选择）
+dialog.modal {
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+    color: var(--text);
+    &::backdrop { background: rgba(8, 16, 27, .7); opacity: 1; }
+    .modal-window {
+        background: var(--panel);
+        color: var(--text);
+        padding: 18px;
+        box-sizing: border-box;
+    }
+}

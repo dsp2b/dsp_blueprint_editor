@@ -1,5 +1,11 @@
 <template>
-    <h2>{{ t(buildingItem.name) }} <small>#{{ building.index }}</small></h2>
+    <div class="detail-head">
+        <BuildingIcon :icon-id="itemIconId(building.itemId)" alt="" />
+        <div>
+            <h3 class="detail-name">{{ t(buildingItem.name) }}</h3>
+            <p>#{{ building.index }} <span>{{ t('位置') }} ({{ position }})</span></p>
+        </div>
+    </div>
     <BuildingRecipe v-if="building.recipeId > 0" :recipeId="building.recipeId" />
 
     <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
@@ -175,6 +181,11 @@ commandQueue.updater.updateBeltIcon.onMounted(b => {
 });
 
 const bParams = computed(() => props.building.parameters);
+const fmt = (v: number) => String(Math.round(v * 100) / 100);
+const position = computed(() => {
+    const p = props.building.localOffset[0];
+    return `${fmt(p.x)}, ${fmt(p.y)}`;
+});
 const energyExchangerMode = computed(() => {
     const mode = (props.building.parameters as EnergyExchangerParameters).mode;
     return t(energyExchangerModeTexts.get(mode)!);
@@ -182,6 +193,21 @@ const energyExchangerMode = computed(() => {
 </script>
 
 <style lang="scss">
+.detail-head {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+    .icon { width: 48px; flex: none; }
+    .detail-name { margin: 0; font: 600 16px/1.3 var(--cjk); color: var(--text); }
+    p {
+        margin: 2px 0 0;
+        font: 12px var(--num);
+        color: var(--muted);
+        span { margin-left: 8px; }
+    }
+}
+
 .building-params {
     margin-bottom: 20px;
     h3 {
@@ -201,7 +227,7 @@ const energyExchangerMode = computed(() => {
     }
     label {
         display: inline-block;
-        font-weight: bold;
+        color: var(--muted);
     }
     .v {
         display: inline-block;
@@ -225,11 +251,13 @@ const energyExchangerMode = computed(() => {
 {
     "zh": {
         "模式": "模式",
-        "送入轨道": "送入轨道"
+        "送入轨道": "送入轨道",
+        "位置": "位置"
     },
     "en": {
         "模式": "Mode",
-        "送入轨道": "Orbit"
+        "送入轨道": "Orbit",
+        "位置": "Position"
     },
     "fr": {
         "模式": "Mode",
