@@ -22,7 +22,7 @@
    - Verified: screenshot `.dev-kit/artifacts/2026-11-18-preview-redesign/mockups/screens/before-desktop.png`, a real 0.10.35 blueprint with 20 assemblers.
 2. **Rendering lacks fidelity and readability.**
    - Buildings are unlit flat boxes; belts and sorters are straight lines. Players can't relate the view to the game.
-   - Verified: `before-desktop.png`, and `BlueprintEditor.vue` builds the boxes with `MeshBasicMaterial`.
+   - Verified: `before-desktop.png`, and `BlueprintEditor.vue` builds the boxes with unlit-looking `MeshLambertMaterial` boxes.
 3. **The sidebar is not organised around tasks.**
    - Thumbnail editing, the code box and the building list are stacked together.
    - There is no answer to "what does this blueprint consume, what does it produce, is it balanced?"
@@ -122,7 +122,7 @@
 - With "Belt flow animation" off or reduced motion, belt scrolling, cargo movement and the sorter animation all stop. Cargo and grabbers then sit at fixed positions.
 - Download progress is shown at the top centre (count done / total, MB). Downloaded types replace their boxes immediately; it disappears when done.
 - If a model fails to download, that type stays a box, the progress text names the failed count, and the user can retry. Other buildings are unaffected.
-- Downloaded models are cached by the PWA; types already seen work offline.
+- Model files are not part of PWA install-time precache (otherwise Simple mode would download them too). Only models actually downloaded in Real model mode are cached at runtime; types already seen work offline.
 
 ### Orientation consistency
 

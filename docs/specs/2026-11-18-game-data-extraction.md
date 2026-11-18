@@ -58,6 +58,7 @@ Every buildable item (`CanBuild` with `ModelIndex > 0`) must be accounted for in
 
 - Item, recipe, tech icon, signal icon and MIDI data plus translations are fully regenerated, replacing the current output of `gen.sh`. Item entries include 2401 and 1211.
 - Building metadata (box size, offset, colour, and the position/orientation of connection slots `slotPoses` and sorter insert points `insertPoses`) is generated for every model that has a `SlotConfig`, 67 in total, replacing the hand table. Models 117 (orbital collector) and 664 (laser beacon) are now present.
+- Each building model's work parameters (assembly/smelting speed `assemblerSpeed`, lab speed `labAssembleSpeed/labResearchSpeed`, belt speed `beltSpeed`, sorter speed, mining speed, and so on, from `PrefabDesc`) and each item's `Grade/Upgrades/BuildIndex` are emitted along with the building metadata, for material-flow calculation and belt/sorter animation speed.
 - Icons are written to the existing `src/assets/icons/{item_recipe,tech,signal}/` locations.
 - Models are written to a static asset directory, by model index and LOD, served by the site and lazy-loaded at runtime.
 
@@ -91,7 +92,7 @@ Every buildable item (`CanBuild` with `ModelIndex > 0`) must be accounted for in
 | Coverage check (built into the tool) | Every buildable item is covered; exits non-zero otherwise | none |
 | GLB validation (Khronos glTF Validator) | 0 errors, 0 warnings for all GLBs | Spike validate.mjs |
 | Parser unit tests | Laser beacon parameters/text round-trip; orbital collector all-zero parameters | `tests/unit/blueprint/parser.spec.ts` |
-| dsp2b-go compatibility | Regenerated `data/*.json` are consumed by the existing Go tests | `dsp2b-go/pkg/blueprint/parse_test.go` |
+| dsp2b-go compatibility | Regenerated `data/*.json` are consumed by the existing Go tests | `dsp2b-go/internal/service/blueprint_svc/blueprint_test.go` |
 
 Cannot be automated: the extraction itself depends on the game install (CI does not have it). After running it, the maintainer checks the tool report (version, coverage, diff summary) and spot-checks the rendering of a few models (including power plant model 54, whose selection centre is off-centre, as the mirroring check).
 
