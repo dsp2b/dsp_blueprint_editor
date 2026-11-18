@@ -1,186 +1,255 @@
-import { BoxGeometry, Color, CylinderGeometry, InstancedMesh, Matrix4, MeshLambertMaterial, Object3D, Vector3 } from 'three';
+import {
+    BufferAttribute, BufferGeometry, CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Material, Matrix4, Mesh,
+    MeshBasicMaterial, MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, TubeGeometry, Vector3,
+} from 'three';
 import { BlueprintBuilding } from '@/blueprint/parser';
 import { buildingMeta } from '@/data/building';
-import { isBelt, isInserter } from '@/data/items';
-import { Cargos } from '@/cargos';
-import { inserterTrans } from '../core/pick';
+import { isInserter } from '@/data/items';
+import { BeltPath, BeltTier, buildBeltPaths } from '../beltPath';
 import { TIER_COLORS, tierOf } from '../core/tiers';
 import type { Layer, LayerContext } from '../layers';
 
 const FALLBACK = new Color(0xdddddd);
 const DIM_OPACITY = 0.3;
+/** 传送带条带半宽（米） */
+const BELT_HALF_WIDTH = 0.3;
+/** 一个箭头沿带长占的长度（米） */
+const ARROW_LENGTH = 1.0;
+/** 箭头滚动速度（米/秒，与 mockup 一致） */
+const FLOW_SPEED: Record<BeltTier, number> = { 1: 0.6, 2: 1.2, 3: 1.8 };
+/** 分拣器弧线：两端离地高度、拱高上限、管半径 */
+const SORTER_BASE = 0.3;
+const SORTER_ARCH = 1.1;
+const SORTER_RADIUS = 0.08;
+const SORTER_SEGMENTS = 16;
 
-function linkColor(b: BlueprintBuilding) {
-    const tier = tierOf(b.itemId);
-    return tier ? TIER_COLORS[tier] : buildingMeta.get(b.modelIndex)?.color ?? FALLBACK;
+/** 深色底上的等级色箭头（指向 +u，即流向） */
+function chevronTexture(color: Color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 32;
+    const g = canvas.getContext('2d')!;
+    g.fillStyle = `#${color.clone().multiplyScalar(0.55).getHexString()}`;
+    g.fillRect(0, 0, 64, 32);
+    g.strokeStyle = `#${color.getHexString()}`;
+    g.lineWidth = 6;
+    g.lineJoin = 'round';
+    g.beginPath();
+    g.moveTo(22, 6);
+    g.lineTo(38, 16);
+    g.lineTo(22, 26);
+    g.stroke();
+    const t = new CanvasTexture(canvas);
+    t.wrapS = RepeatWrapping;
+    t.colorSpace = SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+}
+
+interface Part {
+    /** 这一段涉及的建筑 index：任一被高亮则整段正常显示 */
+    buildings: number[];
+    start: number;
+    count: number;
 }
 
 /**
- * 精简模式的传送带与分拣器。
- * 目前沿用原来的圆片 + 连杆 + 货物动画，按等级着色；传送带条带与分拣器弧线由后续实现替换。
+ * 多段几何合并成一个网格，靠 geometry group 分成"正常 / 淡化"两种材质：
+ * 高亮时把不匹配的段的三角形排到索引末尾，交给半透明、不写深度的材质。
  */
+class MergedParts {
+    readonly positions: number[] = [];
+    readonly normals: number[] = [];
+    readonly uvs: number[] = [];
+    readonly indices: number[] = [];
+    readonly parts: Part[] = [];
+    private full: Uint32Array | null = null;
+    mesh: Mesh<BufferGeometry, Material[]> | null = null;
+
+    begin(buildings: number[]) {
+        this.parts.push({ buildings, start: this.indices.length, count: 0 });
+        return this.positions.length / 3;
+    }
+
+    end() {
+        const p = this.parts[this.parts.length - 1];
+        p.count = this.indices.length - p.start;
+    }
+
+    build(material: Material, dim: Material) {
+        const geometry = new BufferGeometry();
+        geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
+        if (this.normals.length)
+            geometry.setAttribute('normal', new BufferAttribute(new Float32Array(this.normals), 3));
+        if (this.uvs.length)
+            geometry.setAttribute('uv', new BufferAttribute(new Float32Array(this.uvs), 2));
+        this.full = new Uint32Array(this.indices);
+        geometry.setIndex(new BufferAttribute(this.full.slice(), 1));
+        geometry.addGroup(0, this.full.length, 0);
+        geometry.computeBoundingSphere();
+        this.mesh = new Mesh(geometry, [material, dim]);
+        return this.mesh;
+    }
+
+    setMask(mask: Uint8Array | null) {
+        if (!this.mesh || !this.full)
+            return;
+        const geometry = this.mesh.geometry;
+        const index = geometry.getIndex()!;
+        const arr = index.array as Uint32Array;
+        geometry.clearGroups();
+        if (mask === null) {
+            arr.set(this.full);
+            geometry.addGroup(0, arr.length, 0);
+        } else {
+            let k = 0;
+            const lit = (p: Part) => p.buildings.some(b => mask[b]);
+            for (const pass of [true, false]) {
+                const from = k;
+                for (const p of this.parts)
+                    if (lit(p) === pass) {
+                        arr.set(this.full.subarray(p.start, p.start + p.count), k);
+                        k += p.count;
+                    }
+                if (k > from)
+                    geometry.addGroup(from, k - from, pass ? 0 : 1);
+            }
+        }
+        index.needsUpdate = true;
+    }
+
+    dispose() {
+        this.mesh?.geometry.dispose();
+        this.mesh = null;
+    }
+}
+
+function dimOf<M extends Material>(m: M) {
+    const d = m.clone() as M;
+    d.transparent = true;
+    d.opacity = DIM_OPACITY;
+    d.depthWrite = false;
+    return d;
+}
+
+const side = new Vector3();
+/** 沿路径的等级色条带；u 为弧长/箭头长度，v 跨宽度 */
+function addStrip(parts: MergedParts, path: BeltPath) {
+    if (path.points.length < 2)
+        return;
+    const base = parts.begin(path.buildingIndices);
+    for (const p of path.points) {
+        side.set(1, 0, 0).applyQuaternion(p.rot).multiplyScalar(BELT_HALF_WIDTH);
+        parts.positions.push(p.pos.x + side.x, p.pos.y + side.y, p.pos.z + side.z);
+        parts.positions.push(p.pos.x - side.x, p.pos.y - side.y, p.pos.z - side.z);
+        parts.uvs.push(p.t / ARROW_LENGTH, 0, p.t / ARROW_LENGTH, 1);
+    }
+    for (let i = 0; i + 1 < path.points.length; i++) {
+        const k = base + i * 2;
+        parts.indices.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+    }
+    parts.end();
+}
+
+const p0 = new Vector3();
+const p1 = new Vector3();
+const up = new Vector3();
+/** 分拣器：从取货端拱到放货端的弧形管 */
+function addArc(parts: MergedParts, b: BlueprintBuilding, transforms: Matrix4[]) {
+    p0.setFromMatrixPosition(transforms[0]);
+    p1.setFromMatrixPosition(transforms[1]);
+    const len = p0.distanceTo(p1);
+    if (len < 0.05)
+        return;
+    up.addVectors(p0, p1).normalize();
+    const arch = Math.min(SORTER_ARCH, 0.4 + 0.35 * len);
+    const pts: Vector3[] = [];
+    for (let i = 0; i <= SORTER_SEGMENTS; i++) {
+        const k = i / SORTER_SEGMENTS;
+        pts.push(new Vector3().lerpVectors(p0, p1, k).addScaledVector(up, SORTER_BASE + Math.sin(Math.PI * k) * arch));
+    }
+    const tube = new TubeGeometry(new CatmullRomCurve3(pts), SORTER_SEGMENTS, SORTER_RADIUS, 6);
+    const base = parts.begin([b.index]);
+    parts.positions.push(...(tube.getAttribute('position').array as Float32Array));
+    parts.normals.push(...(tube.getAttribute('normal').array as Float32Array));
+    for (const i of Array.from(tube.getIndex()!.array))
+        parts.indices.push(base + i);
+    parts.end();
+    tube.dispose();
+}
+
+/** 精简模式：传送带为带流向箭头的等级色条带（按游戏 Bezier 路径），分拣器为等级色弧线 */
 export function createLinksLayer(): Layer {
     let ctx: LayerContext | null = null;
-    const materials: MeshLambertMaterial[] = [];
-    let cargos: Cargos | null = null;
-    const meshes: InstancedMesh[] = [];
-    const modelRef = new Map<number, { mesh: InstancedMesh, instance: number }>();
-    let cargoTime = 0;
-
-    const buildBelts = (c: LayerContext, belts: BlueprintBuilding[], addCargo: (t: Matrix4, color: Color, d: number) => void) => {
-        const thickness = 0.1;
-        const material = new MeshLambertMaterial();
-        materials.push(material);
-        const objects: Object3D[] = [];
-        {
-            const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            const offset = new Matrix4().makeRotationX(Math.PI / 2);
-            offset.premultiply(new Matrix4().makeTranslation(0, 0, thickness / 2));
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b = belts[i];
-                trans.copy(c.transforms[b.index][0]);
-                trans.multiply(offset);
-                mesh.setMatrixAt(i, trans);
-                mesh.setColorAt(i, linkColor(b));
-                modelRef.set(b.index, { mesh, instance: i });
-            }
-            mesh.instanceMatrix.needsUpdate = true;
-            mesh.instanceColor!.needsUpdate = true;
-            meshes.push(mesh);
-            objects.push(mesh);
-        }
-        const linkThickness = 0.6 * thickness;
-        { // 相邻传送带之间的连杆
-            const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-            const mesh = new InstancedMesh(geometry, material, belts.length);
-            let numLinks = 0;
-            const offset = new Matrix4().makeTranslation(0, linkThickness / 2, -0.5);
-            const pos1 = new Vector3();
-            const pos2 = new Vector3();
-            const dir = new Vector3();
-            const temp = new Matrix4();
-            const trans = new Matrix4();
-            for (let i = 0; i < belts.length; i++) {
-                const b1 = belts[i];
-                if (b1.outputObjIdx < 0 || !c.transforms[b1.outputObjIdx])
-                    continue;
-                pos1.setFromMatrixPosition(c.transforms[b1.index][0]);
-                pos2.setFromMatrixPosition(c.transforms[b1.outputObjIdx][0]);
-                const len = dir.subVectors(pos1, pos2).length();
-                trans.identity();
-                trans.lookAt(pos1, pos2, pos1);
-                trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
-
-                const color = linkColor(b1);
-                addCargo(trans, color, len);
-
-                trans.multiply(temp.makeScale(1., 1., len));
-                trans.multiply(offset);
-                mesh.setMatrixAt(numLinks, trans);
-                mesh.setColorAt(numLinks, color);
-                numLinks++;
-            }
-            if (numLinks) {
-                mesh.count = numLinks;
-                mesh.instanceMatrix.needsUpdate = true;
-                mesh.instanceColor!.needsUpdate = true;
-                meshes.push(mesh);
-                objects.push(mesh);
-            } else {
-                mesh.dispose();
-                geometry.dispose();
-            }
-        }
-        return objects;
-    };
-
-    const buildInserters = (c: LayerContext, inserters: BlueprintBuilding[], addCargo: (t: Matrix4, color: Color, d: number) => void) => {
-        const inserterThickness = 0.06;
-        const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
-        const material = new MeshLambertMaterial();
-        materials.push(material);
-        const mesh = new InstancedMesh(geometry, material, inserters.length);
-        const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-        const temp = new Matrix4();
-        const trans = new Matrix4();
-        for (let i = 0; i < inserters.length; i++) {
-            const b = inserters[i];
-            const len = inserterTrans(c.transforms[b.index], trans);
-            const color = linkColor(b);
-            addCargo(trans, color, len);
-
-            trans.multiply(temp.makeScale(1., 1., len));
-            trans.multiply(offset);
-            mesh.setMatrixAt(i, trans);
-            mesh.setColorAt(i, color);
-            modelRef.set(b.index, { mesh, instance: i });
-        }
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor!.needsUpdate = true;
-        meshes.push(mesh);
-        return [mesh];
-    };
+    const groups: MergedParts[] = [];
+    const materials: Material[] = [];
+    const flows: { texture: CanvasTexture, speed: number }[] = [];
+    const indices = new Set<number>();
 
     return {
         build(c) {
             ctx = c;
-            const belts = c.buildings.filter(b => isBelt(b.itemId));
-            const inserters = c.buildings.filter(b => isInserter(b.itemId));
-            if (belts.length + inserters.length === 0)
-                return;
+            const paths = buildBeltPaths(c.data, buildingMeta, c.transforms);
+            const byTier = new Map<BeltTier, BeltPath[]>();
+            for (const p of paths) {
+                byTier.set(p.tier, [...byTier.get(p.tier) ?? [], p]);
+                p.buildingIndices.forEach(i => indices.add(i));
+            }
+            for (const [tier, list] of byTier) {
+                const parts = new MergedParts();
+                list.forEach(p => addStrip(parts, p));
+                if (!parts.indices.length)
+                    continue;
+                const texture = chevronTexture(TIER_COLORS[tier]);
+                const material = new MeshBasicMaterial({ map: texture, side: DoubleSide });
+                const dim = dimOf(material);
+                materials.push(material, dim);
+                flows.push({ texture, speed: FLOW_SPEED[tier] });
+                c.root.add(parts.build(material, dim));
+                groups.push(parts);
+            }
 
-            const cargosMesh = new Cargos(belts.length + inserters.length);
-            let numCargos = 0;
-            const addCargo = (trans: Matrix4, color: Color, distance: number) => {
-                cargosMesh.setMatrixAt(numCargos, trans);
-                cargosMesh.setColorAt(numCargos, color);
-                cargosMesh.setCargoDistanceAt(numCargos, distance);
-                numCargos++;
-            };
-            if (belts.length)
-                c.root.add(...buildBelts(c, belts, addCargo));
-            if (inserters.length)
-                c.root.add(...buildInserters(c, inserters, addCargo));
-
-            if (numCargos) {
-                cargosMesh.count = numCargos;
-                cargosMesh.instanceMatrix.needsUpdate = true;
-                cargosMesh.instanceColor!.needsUpdate = true;
-                cargosMesh.geometry.cargoDistance.needsUpdate = true;
-                cargos = cargosMesh;
-                materials.push(cargosMesh.material);
-                c.root.add(cargosMesh);
-            } else {
-                cargosMesh.dispose();
-                cargosMesh.geometry.dispose();
-                cargosMesh.material.dispose();
+            const sorters = new Map<number, MergedParts>();
+            for (const b of c.buildings) {
+                if (!isInserter(b.itemId) || !c.transforms[b.index])
+                    continue;
+                const tier = tierOf(b.itemId);
+                const color = tier ? TIER_COLORS[tier] : buildingMeta.get(b.modelIndex)?.color ?? FALLBACK;
+                const key = color.getHex();
+                const parts = sorters.get(key) ?? new MergedParts();
+                sorters.set(key, parts);
+                addArc(parts, b, c.transforms[b.index]);
+                indices.add(b.index);
+            }
+            for (const [hex, parts] of sorters) {
+                if (!parts.indices.length)
+                    continue;
+                const color = new Color(hex);
+                const material = new MeshStandardMaterial({ color, roughness: 0.4, emissive: color, emissiveIntensity: 0.25 });
+                const dim = dimOf(material);
+                materials.push(material, dim);
+                c.root.add(parts.build(material, dim));
+                groups.push(parts);
             }
         },
         update(dt) {
-            if (!cargos || !ctx)
+            // 关闭流向或要求减少动态效果时（view.flow 已合并两者）箭头停在原处
+            if (!ctx?.view.flow)
                 return;
-            // 关闭流向或要求减少动态效果时货物停在原处
-            if (ctx.view.flow)
-                cargoTime = (cargoTime + dt) % 1;
-            cargos.cargoMove = cargoTime;
+            for (const f of flows)
+                f.texture.offset.x = (f.texture.offset.x - f.speed * dt / ARROW_LENGTH) % 1;
         },
         dispose() {
-            for (const m of meshes) {
-                m.geometry.dispose();
-                m.dispose();
-            }
-            if (cargos) {
-                cargos.geometry.dispose();
-                cargos.dispose();
-            }
+            for (const g of groups)
+                g.dispose();
             for (const m of materials)
                 m.dispose();
-            meshes.length = 0;
+            for (const f of flows)
+                f.texture.dispose();
+            groups.length = 0;
             materials.length = 0;
-            modelRef.clear();
-            cargos = null;
+            flows.length = 0;
+            indices.clear();
             ctx = null;
         },
         setVisible(visible) {
@@ -188,20 +257,13 @@ export function createLinksLayer(): Layer {
                 ctx.root.visible = visible;
         },
         setHighlight(mask) {
-            for (const m of materials) {
-                m.transparent = mask !== null;
-                m.opacity = mask !== null ? DIM_OPACITY : 1;
-                m.depthWrite = mask === null;
-                m.needsUpdate = true;
-            }
+            for (const g of groups)
+                g.setMask(mask);
         },
         modelOf(index) {
-            const ref = modelRef.get(index);
-            if (!ref)
+            if (!ctx || !indices.has(index))
                 return null;
-            const m = new Matrix4();
-            ref.mesh.getMatrixAt(ref.instance, m);
-            return m;
+            return ctx.transforms[index][0].clone();
         },
     };
 }
