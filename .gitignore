@@ -21,3 +21,6 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# dev-kit 本地产物（mockup、计划、评审）
+/.dev-kit/
