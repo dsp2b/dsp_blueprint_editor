@@ -268,7 +268,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1116)!, count: 4},
         ],
-        grid: [1, 4, 6],
+        grid: [1, 5, 8],
     },
     {
         id: 25, name: '有机晶体', time: 360,
@@ -314,7 +314,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1126)!, count: 1},
         ],
-        grid: [1, 5, 5],
+        grid: [1, 4, 5],
     },
     {
         id: 29, name: '卡西米尔晶体（高效）', time: 240,
@@ -326,7 +326,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1126)!, count: 1},
         ],
-        grid: [1, 6, 5],
+        grid: [1, 5, 5],
         icon: 'casimir-crystal-lv2',
     },
     {
@@ -393,7 +393,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1124)!, count: 2},
         ],
-        grid: [1, 5, 8],
+        grid: [1, 4, 9],
         icon: 'nanotube-lv2',
     },
     {
@@ -815,7 +815,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(2311)!, count: 1},
         ],
-        grid: [2, 4, 10],
+        grid: [2, 4, 11],
     },
     {
         id: 72, name: '射线接收站', time: 480,
@@ -852,7 +852,7 @@ export const recipes: Recipe[] = [
             {item: itemsMap.get(1122)!, count: 2},
             {item: itemsMap.get(1120)!, count: 2},
         ],
-        grid: [1, 7, 8],
+        grid: [1, 7, 9],
         icon: 'photon-formula',
         nonProductive: true,
     },
@@ -904,7 +904,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1210)!, count: 1},
         ],
-        grid: [1, 7, 6],
+        grid: [1, 7, 7],
     },
     {
         id: 79, name: '空间翘曲器（高级）', time: 600,
@@ -914,7 +914,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1210)!, count: 8},
         ],
-        grid: [1, 7, 7],
+        grid: [1, 7, 8],
         icon: 'space-warper-lv2',
     },
     {
@@ -952,7 +952,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(2312)!, count: 1},
         ],
-        grid: [2, 4, 11],
+        grid: [2, 4, 12],
     },
     {
         id: 83, name: '小型运载火箭', time: 360,
@@ -1149,7 +1149,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1206)!, count: 1},
         ],
-        grid: [1, 5, 6],
+        grid: [1, 4, 6],
     },
     {
         id: 100, name: '粒子容器（高效）', time: 240,
@@ -1160,7 +1160,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1206)!, count: 1},
         ],
-        grid: [1, 6, 6],
+        grid: [1, 5, 6],
         icon: 'partical-capacitor-lv2',
     },
     {
@@ -1172,7 +1172,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1209)!, count: 1},
         ],
-        grid: [1, 4, 5],
+        grid: [1, 6, 5],
     },
     {
         id: 102, name: '引力矩阵', time: 1440,
@@ -1207,7 +1207,7 @@ export const recipes: Recipe[] = [
         to: [
             {item: itemsMap.get(1127)!, count: 1},
         ],
-        grid: [1, 4, 9],
+        grid: [1, 7, 6],
     },
     {
         id: 106, name: '增产剂 Mk.I', time: 30,
@@ -1901,5 +1901,29 @@ export const recipes: Recipe[] = [
             {item: itemsMap.get(2014)!, count: 1},
         ],
         grid: [2, 3, 4],
+    },
+    {
+        id: 161, name: '激光灯塔', time: 240,
+        from: [
+            {item: itemsMap.get(1101)!, count: 3},
+            {item: itemsMap.get(1111)!, count: 4},
+            {item: itemsMap.get(1401)!, count: 2},
+            {item: itemsMap.get(1301)!, count: 2},
+        ],
+        to: [
+            {item: itemsMap.get(2401)!, count: 1},
+        ],
+        grid: [2, 4, 10],
+    },
+    {
+        id: 162, name: '黑雾引力透镜', time: 360,
+        from: [
+            {item: itemsMap.get(1209)!, count: 1},
+            {item: itemsMap.get(5201)!, count: 12},
+        ],
+        to: [
+            {item: itemsMap.get(1211)!, count: 1},
+        ],
+        grid: [1, 6, 6],
     },
 ];
