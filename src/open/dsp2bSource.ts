@@ -14,7 +14,8 @@ export function isPlausibleId(id: string | null | undefined): id is string {
     return !!id && id.length <= 64 && /^[A-Za-z0-9-]+$/.test(id);
 }
 
-export const apiUrl = (id: string) => `${DSP2B_BASE}/api/blueprint/${id}`;
+/** 不在 /api 下：dsp2b 生产 ingress 把 /api 整个转给 Go 后端 */
+export const apiUrl = (id: string) => `${DSP2B_BASE}/open-api/blueprint/${id}`;
 
 /** 回到 dsp2b 蓝图页的链接；界面语言为中文时用 zh-CN，否则 en */
 export const backLink = (id: string, locale: string) =>
