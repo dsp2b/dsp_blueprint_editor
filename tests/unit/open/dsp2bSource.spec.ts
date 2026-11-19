@@ -21,7 +21,7 @@ describe('isPlausibleId', () => {
 
 describe('urls', () => {
     it('builds the api url', () => {
-        expect(apiUrl('abc-1')).toBe('https://www.dsp2b.com/api/blueprint/abc-1');
+        expect(apiUrl('abc-1')).toBe('https://www.dsp2b.com/open-api/blueprint/abc-1');
     });
     it('builds the back link per language', () => {
         expect(backLink('abc-1', 'zh')).toBe('https://www.dsp2b.com/zh-CN/blueprint/abc-1');
