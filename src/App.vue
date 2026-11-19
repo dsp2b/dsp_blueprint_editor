@@ -6,7 +6,7 @@
                 v-model:selectedBuildingIndex="selectedBuildingIndex" />
             <OpenCard v-if="!data"
                 v-model:input="session.input.value"
-                :error="session.error.value ?? sourceError" :loading="cardLoading"
+                :error="session.error.value ?? sourceError" :loading="cardLoading" :fetching="fetching"
                 :recent="session.recent.value" :supported="supportedGameVersion" :dragging="dragging"
                 @open="openCode" @clear-recent="session.clearRecent()" />
             <div v-if="!data" class="float-settings">

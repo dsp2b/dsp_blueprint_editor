@@ -17,6 +17,7 @@
             <div v-if="loading.visible" class="progress-text" aria-live="polite">
                 {{ t('已读取建筑', { done: loading.done, total: loading.total }) }}
             </div>
+            <div v-if="fetching" class="progress-text" role="status" aria-live="polite">{{ t('正在获取') }}</div>
             <OpenError v-if="error" :error="error" />
             <div class="row">
                 <button class="btn primary" type="button" :disabled="loading.active" @click="pasteClipboard">
@@ -67,6 +68,8 @@ const props = defineProps<{
     recent: RecentEntry[];
     supported: string;
     dragging?: boolean;
+    /** 正在从 dsp2b 取回蓝图 */
+    fetching?: boolean;
 }>();
 const emit = defineEmits<{
     (e: 'update:input', v: string): void;
@@ -194,6 +197,7 @@ li button {
 {
     zh: {
         "标题": "预览戴森球计划蓝图",
+        "正在获取": "正在从 dsp2b 获取蓝图…",
         "说明": "粘贴从游戏或 dsp2b 复制的蓝图代码，或者把蓝图 .txt 文件拖到这里。",
         "蓝图代码": "蓝图代码",
         "解析中": "解析中",
@@ -209,6 +213,7 @@ li button {
     },
     en: {
         "标题": "Preview Dyson Sphere Program blueprints",
+        "正在获取": "Fetching the blueprint from dsp2b…",
         "说明": "Paste a blueprint code copied from the game or dsp2b, or drop a blueprint .txt file here.",
         "蓝图代码": "Blueprint code",
         "解析中": "Parsing",
