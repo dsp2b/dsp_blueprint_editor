@@ -63,7 +63,7 @@ export class IconTexture {
             }
             const pos = new Vector2(index % WIDTH, Math.floor(index / WIDTH));
             pos.multiplyScalar(ICON_SIZE);
-            this.renderer.copyTextureToTexture(pos, texture, this.texture);
+            this.renderer.copyTextureToTexture(texture, this.texture, null, pos);
             texture.dispose();
         })().catch(e => {
             this.loaded.delete(index);

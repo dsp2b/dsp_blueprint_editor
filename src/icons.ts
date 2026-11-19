@@ -92,7 +92,7 @@ void main() {
         this.depthWrite = false;
         this.transparent = true;
         this.fog = true;
-        this.defaultAttributeValues.iconScale = Float32Array.of(1.0, 1.0);
+        (this.defaultAttributeValues as Record<string, unknown>).iconScale = Float32Array.of(1.0, 1.0);
     }
 }
 
@@ -102,14 +102,17 @@ function updateAttr(attr: InstancedBufferAttribute, index: number) {
     const count = attr.itemSize;
     let start = index * count;
     let end = start + count;
-    if (attr.updateRange.count === -1) {
+    // 自上次上传以来的改动合并成一个区间（渲染器上传后会清空 updateRanges）
+    const pending = attr.updateRanges[0];
+    if (!pending) {
+        attr.addUpdateRange(start, end - start);
         attr.needsUpdate = true;
-    } else {
-        start = Math.min(start, attr.updateRange.offset);
-        end = Math.max(end, attr.updateRange.offset + attr.updateRange.count);
+        return;
     }
-    attr.updateRange.offset = start;
-    attr.updateRange.count = end - start;
+    start = Math.min(start, pending.start);
+    end = Math.max(end, pending.start + pending.count);
+    pending.start = start;
+    pending.count = end - start;
 }
 
 function extendAttr(attr: InstancedBufferAttribute, newLength: number) {
