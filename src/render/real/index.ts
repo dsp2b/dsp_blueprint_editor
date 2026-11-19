@@ -110,7 +110,7 @@ class ProgressPill {
 
 let globalT: Promise<Translate> | null = null;
 /** 全局 vue-i18n 的 t，并把进度提示的文案合并进去（异步取得：纯模块测试里不加载 vue-i18n 实例） */
-function globalTranslate() {
+export function globalTranslate() {
     return globalT ??= import('@/i18n').then(m => {
         const g = m.default.global;
         for (const [lang, messages] of Object.entries(modelPillMessages))
