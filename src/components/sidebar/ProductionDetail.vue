@@ -78,7 +78,7 @@ const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
 
 /** 只有有配方且按配方工作的建筑（制造台、熔炉、化工厂、研究站……）才有满速产出；采矿机不显示 */
 const info = computed(() => {
-    queue.execVersion.value;
+    void queue.execVersion.value;
     const b = props.building;
     const worker = gameEnv.worker(b.modelIndex);
     const recipe = b.recipeId > 0 ? gameEnv.recipe(b.recipeId) : undefined;
@@ -88,12 +88,12 @@ const info = computed(() => {
 });
 
 const connections = computed(() => {
-    queue.execVersion.value;
+    void queue.execVersion.value;
     return connectionSummary(props.building, buildingInfo.adjacency);
 });
 
 const sameTypeCount = computed(() => {
-    queue.execVersion.value;
+    void queue.execVersion.value;
     return queue.data.buildings.filter(b => b.itemId === props.building.itemId).length;
 });
 const selectAll = () => { renderer.value?.selectAll(props.building.itemId); };

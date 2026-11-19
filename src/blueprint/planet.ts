@@ -160,7 +160,7 @@ export function findPosForAreas(areas: BlueprintArea[], segment = 200): Position
                     inNegativeHemisphere = true;
             }
         }
-        let latitude = NaN;
+        let latitude: number;
         if (onLowTropic)  // Should not be possible in current game version
             latitude = planetAreaInfo.minLatitudeSeg * GRID_PER_SEGMENT + 1;
         else if (onHighTropic)

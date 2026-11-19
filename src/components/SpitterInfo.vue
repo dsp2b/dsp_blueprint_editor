@@ -53,7 +53,7 @@ const color = (i: number) => {
 
 const posFromCamera = computed(() => {
     const pos = new Matrix4();
-    mainRenderer.cameraPosVersion;
+    void mainRenderer.cameraPosVersion;
     const model = mainRenderer.getModel(props.building.index);
     if (model) {  // may be null when closing blueprint
         pos.multiplyMatrices(mainRenderer.camera.matrixWorldInverse, model);

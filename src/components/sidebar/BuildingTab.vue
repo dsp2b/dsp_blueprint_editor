@@ -23,7 +23,7 @@ const { t } = useI18n();
 const queue = inject(commandQueueKey)!.value;
 // 换配方后让参数面板里的配方图标刷新（建筑对象本身不是响应式的）
 const recipeId = computed(() => {
-    queue?.execVersion.value;
+    void queue?.execVersion.value;
     return props.building?.recipeId;
 });
 </script>

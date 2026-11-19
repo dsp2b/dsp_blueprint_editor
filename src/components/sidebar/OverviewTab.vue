@@ -37,7 +37,7 @@ const renderer = inject(rendererKey, ref(null));
 const buildings = computed(() => props.data.buildings);
 const footprint = computed(() => footprintCells(props.data.areas));
 const flow = computed(() => {
-    queue?.execVersion.value; // 改配方等编辑（含撤销）后重新统计；建筑对象本身不是响应式的
+    void queue?.execVersion.value; // 改配方等编辑（含撤销）后重新统计；建筑对象本身不是响应式的
     return analyzeMaterialFlow(buildings.value, gameEnv);
 });
 
