@@ -1,12 +1,10 @@
 /**
  * 真实模型下载进度提示的文案；运行时合并进全局 vue-i18n（见 index.ts）。
- * 生产构建的 vue-i18n 是 runtimeOnly（不含消息编译器），运行时合并的字符串模板不会被编译、变量也不会被替换，
+ * 生产构建的 vue-i18n 是 runtimeOnly（不含消息编译器），运行时合并的字符串模板不会被编译，t 只返回键名（如 modelPill.loading），
  * 所以这里直接写成预编译的消息函数（等价于 `{name}` 命名插值与 `a | b` 复数）。
  */
-interface MessageContext {
-    named: (key: string) => unknown;
-    plural: (choices: unknown[]) => unknown;
-}
+import type { MessageContext } from 'vue-i18n';
+
 type Message = (ctx: MessageContext) => string;
 
 const progress = (pre: string, mid: string, post: string): Message => ctx => {
