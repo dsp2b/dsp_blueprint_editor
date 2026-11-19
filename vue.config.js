@@ -49,6 +49,26 @@ module.exports = defineConfig({
                 },
             ],
         },
+        workboxOptions: {
+            // 覆盖插件的默认 exclude，所以要带上它原有的几项。
+            // 模型不进安装时预缓存（否则精简模式也会全部下载），真实模型模式下载过的在运行时缓存，离线可用
+            exclude: [/\.map$/, /img\/icons\//, /favicon\.ico$/, /^manifest.*\.js?$/, /^models\//],
+            runtimeCaching: [
+                {
+                    urlPattern: /\/models\/.*\.glb$/,
+                    handler: 'CacheFirst',
+                    options: {
+                        cacheName: 'dsp-models',
+                        expiration: { maxEntries: 300, maxAgeSeconds: 30 * 24 * 3600 },
+                    },
+                },
+                {
+                    urlPattern: /\/models\/manifest\.json$/,
+                    handler: 'NetworkFirst',
+                    options: { cacheName: 'dsp-models-manifest' },
+                },
+            ],
+        },
         iconPaths: {
             faviconSVG: 'img/icons/favicon.svg',
             favicon32: 'img/icons/favicon-32x32.png',

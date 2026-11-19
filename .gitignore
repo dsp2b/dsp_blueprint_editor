@@ -21,3 +21,12 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# dev-kit 本地产物（mockup、计划、评审）
+/.dev-kit/
+
+# tools/extract (Python extraction tool): venv, caches and default output dir
+/tools/extract/.venv/
+/tools/extract/out/
+__pycache__/
+.pytest_cache/

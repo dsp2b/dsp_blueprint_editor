@@ -1,28 +1,30 @@
 <template>
     <Modal v-model:open="open">
-        <h2>{{t('批量替换')}}</h2>
-        <div>{{t('搜索：')}} <RecipeSelect v-model:recipeId="r.searchRecipe"/></div>
-        <div>{{t('替换：')}} <RecipeSelect v-model:recipeId="r.replaceRecipe"/></div>
-        <div>
-            {{t('范围：')}}
-            <span class="replace-scope">
-                <input type="checkbox" id="replace-recipe" v-model="r.scope.recipe"><label for="replace-recipe">{{t('配方')}}</label>
-            </span>
-            <span class="replace-scope">
-                <input type="checkbox" id="replace-filter" v-model="r.scope.filter"><label for="replace-filter">{{t('分拣器筛选')}}</label>
-            </span>
-            <span class="replace-scope">
-                <input type="checkbox" id="replace-station" v-model="r.scope.station"><label for="replace-station">{{t('物流塔栏位')}}</label>
-            </span>
-            <span class="replace-scope">
-                <input type="checkbox" id="replace-band-icon" v-model="r.scope.beltIcon"><label for="replace-band-icon">{{t('传送带图标')}}</label>
-            </span>
-            <span class="replace-scope">
-                <input type="checkbox" id="replace-bp-icon" v-model="r.scope.blueprintIcon"><label for="replace-bp-icon">{{t('蓝图图标')}}</label>
-            </span>
-        </div>
-        <div>
-            <button @click="executeReplace" :disabled="!canReplace">{{t('全部替换')}}</button>
+        <div class="replace-modal">
+            <h2>{{t('批量替换')}}</h2>
+            <div class="replace-row"><span>{{t('搜索：')}}</span> <RecipeSelect v-model:recipeId="r.searchRecipe"/></div>
+            <div class="replace-row"><span>{{t('替换：')}}</span> <RecipeSelect v-model:recipeId="r.replaceRecipe"/></div>
+            <fieldset class="replace-row">
+                <legend>{{t('范围：')}}</legend>
+                <span class="replace-scope">
+                    <input type="checkbox" id="replace-recipe" v-model="r.scope.recipe"><label for="replace-recipe">{{t('配方')}}</label>
+                </span>
+                <span class="replace-scope">
+                    <input type="checkbox" id="replace-filter" v-model="r.scope.filter"><label for="replace-filter">{{t('分拣器筛选')}}</label>
+                </span>
+                <span class="replace-scope">
+                    <input type="checkbox" id="replace-station" v-model="r.scope.station"><label for="replace-station">{{t('物流塔栏位')}}</label>
+                </span>
+                <span class="replace-scope">
+                    <input type="checkbox" id="replace-band-icon" v-model="r.scope.beltIcon"><label for="replace-band-icon">{{t('传送带图标')}}</label>
+                </span>
+                <span class="replace-scope">
+                    <input type="checkbox" id="replace-bp-icon" v-model="r.scope.blueprintIcon"><label for="replace-bp-icon">{{t('蓝图图标')}}</label>
+                </span>
+            </fieldset>
+            <div class="replace-actions">
+                <button type="button" class="btn primary" @click="executeReplace" :disabled="!canReplace">{{t('全部替换')}}</button>
+            </div>
         </div>
     </Modal>
 </template>
@@ -73,12 +75,45 @@ const executeReplace = () => {
 </script>
 
 <style lang="scss">
+.replace-modal {
+    h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; }
+    .replace-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 12px;
+        > span:first-child { min-width: 4em; color: var(--muted); font-size: 13px; }
+        .icon-select {
+            box-sizing: border-box;
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            border-radius: 8px;
+            border: 1px dashed var(--line-2);
+            background: var(--deep);
+            .icon { width: 32px; }
+            .icon-placeholder { display: none; }
+        }
+    }
+    fieldset {
+        border: 0;
+        padding: 0;
+        legend { float: left; min-width: 4em; margin-right: 8px; color: var(--muted); font-size: 13px; }
+    }
+    input[type="checkbox"] { accent-color: var(--holo); }
+    .replace-actions { display: flex; justify-content: flex-end; }
+}
+
 .replace-scope {
-    display: inline-block;
-    margin-left: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
 
     @media screen and (max-width: 360px) {
-        display: block;
+        display: flex;
     }
 }
 </style>

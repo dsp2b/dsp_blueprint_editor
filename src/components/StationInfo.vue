@@ -30,7 +30,7 @@
         <div v-if="inter"><label>{{t('翘曲器必要性')}}</label><span class="v">{{truth(p.warperNecessary)}}</span></div>
         <div v-if="!collector"><label>{{t('运输机起送量')}}</label><span class="v">{{p.deliveryAmountOfDrones}}%</span></div>
         <div v-if="inter"><label>{{t('运输船起送量')}}</label><span class="v">{{p.deliveryAmountOfShips}}%</span></div>
-        <div v-if="collector"><label>{{t('采集速度')}}</label><span class="v">{{(pc.miningSpeed / 100).toLocaleString([], { maximumFractionDigits: 0 })}}%</span></div>
+        <div v-if="miner"><label>{{t('采集速度')}}</label><span class="v">{{(pc.miningSpeed / 100).toLocaleString([], { maximumFractionDigits: 0 })}}%</span></div>
         <div><label>{{t('货物集装数量')}}</label><span class="v">{{p.pilerCount === 0 ? t('集装使用科技上限') : p.pilerCount}}</span></div>
     </div>
 </template>
@@ -109,7 +109,7 @@ import { useI18n } from 'vue-i18n';
 
 import { truth } from '@/utils';
 import { AdvancedMiningMachineParameters } from '@/blueprint/parser';
-import { isAdvancedMiningMachine, isInterstellarStation } from '@/data/items';
+import { isAdvancedMiningMachine, isInterstellarStation, isOrbitalCollector } from '@/data/items';
 import { buildingInfoKey, commandQueueKey } from '@/define';
 import ItemSelect from './ItemSelect.vue';
 
@@ -148,7 +148,9 @@ const tripRangeOfShips = computed(() => {
 })
 
 const inter = computed(() => isInterstellarStation(props.building.itemId));
-const collector = computed(() => isAdvancedMiningMachine(props.building.itemId));
+const miner = computed(() => isAdvancedMiningMachine(props.building.itemId));
+// 采矿机与轨道采集器没有运输机/运输船设置
+const collector = computed(() => miner.value || isOrbitalCollector(props.building.itemId));
 </script>
 
 <style lang="scss">

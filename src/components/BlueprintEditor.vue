@@ -1,30 +1,60 @@
 <template>
-	<div class="editor-root" ref="root" tabindex="-1"></div>
+	<div class="editor-root" ref="root" tabindex="-1">
+		<template v-if="loaded">
+			<div v-show="tip.visible" class="hover-tip" role="tooltip"
+				:style="{ left: `${tip.x}px`, top: `${tip.y}px` }">{{ tip.text }}</div>
+
+			<div class="view-tools" role="toolbar" :aria-label="t('视图工具')">
+				<div class="mode-seg" role="group" :aria-label="t('显示模式')">
+					<button type="button" :aria-pressed="mode === 'box'" :title="t('精简说明')" @click="setMode('box')">
+						{{ t('精简') }}
+					</button>
+					<button type="button" :aria-pressed="mode === 'model'" :title="t('真实模型说明')" @click="setMode('model')">
+						{{ t('真实模型') }}
+					</button>
+				</div>
+				<button type="button" class="tool" :title="`${t('对准蓝图')} (F)`" aria-keyshortcuts="F" @click="frameBlueprint()">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+					<span class="label">{{ t('对准蓝图') }}</span>
+				</button>
+				<button type="button" class="tool" :title="`${t('俯视')} (T)`" aria-keyshortcuts="T" @click="topView()">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/></svg>
+					<span class="label">{{ t('俯视') }}</span>
+				</button>
+				<button type="button" class="tool" :aria-pressed="settings.badges" :title="t('配方标记说明')"
+					@click="settings.badges = !settings.badges">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/><path d="M13 7.5h7M4 16.5h7"/></svg>
+					<span class="label">{{ t('配方标记') }}</span>
+				</button>
+				<button type="button" class="tool" :aria-pressed="flowOn" :disabled="reducedMotion"
+					:title="reducedMotion ? t('流向已停') : t('流向说明')" @click="settings.flow = !settings.flow">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h14M13 7l5 5-5 5"/></svg>
+					<span class="label">{{ t('流向') }}</span>
+				</button>
+			</div>
+
+			<button type="button" class="tool tool-shot" :title="t('截图说明')" @click="screenshot()">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+				<span class="label">{{ t('截图') }}</span>
+			</button>
+
+			<div class="legend" role="list" :aria-label="t('等级图例')">
+				<span v-for="tier of tiers" :key="tier.name" role="listitem">
+					<i :style="{ background: tier.color }"></i>{{ tier.name }}
+				</span>
+			</div>
+		</template>
+	</div>
 </template>
 
 <script lang="ts">
-import {
-	Group, LineSegments, InstancedMesh, WebGLRenderer,
-	LineBasicMaterial, MeshStandardMaterial, MeshLambertMaterial, CylinderGeometry, BoxGeometry,
-	Matrix4, DirectionalLight, Vector3, Object3D, Color, Ray, Sphere, Vector2, Mesh,
-} from 'three';
+import { Group, LineSegments, LineBasicMaterial } from 'three';
 import { SphereLatitudeGridGeometry, SphereLongitudeGridGeometry } from '@/SphereGridGeometry';
-import { BeltParameters, BlueprintBuilding } from '@/blueprint/parser';
-import { findPosForAreas, gridAreas, calcBuildingTrans, PositionedBlueprint } from '@/blueprint/planet';
-import { buildingMeta, noIconBuildings } from '@/data/building';
-import { isBelt, isInserter } from '@/data/items';
-import { itemIconId, recipeIconId } from '@/data/icons';
-import { IconTexture } from '@/iconTexture';
-import { IconGeometry, Icons } from '@/icons';
-import { IconSubscript } from '@/iconSubscript';
-import { Cargos } from '@/cargos';
-import { BVH } from '@/bvh';
-import { Updater } from '@/command';
-import { commandQueueKey } from '@/define';
+import { gridAreas } from '@/blueprint/planet';
 
 function buildPlanetGrid(radius = 1, segment = 200) {
 	const allGrids = new Group();
-	const material = new LineBasicMaterial( { color: 0xf0f0f0, depthWrite: false } );
+	const material = new LineBasicMaterial( { color: 0x3E5B7C, transparent: true, opacity: 0.35, depthWrite: false } );
 
 	const latitudeGeometry = new SphereLatitudeGridGeometry({
 		radius,
@@ -46,370 +76,36 @@ function buildPlanetGrid(radius = 1, segment = 200) {
 	return allGrids;
 }
 
-class AllBuildings extends Object3D {
-    constructor(
-        objects: Object3D[],
-        public readonly iconsMesh: Icons,
-        public readonly iconTexture: IconTexture,
-        public readonly cargos: Cargos,
-        public readonly modelRef: { mesh: InstancedMesh, instance: number }[],
-    ) {
-        super();
-        this.add(...objects);
-        this.add(iconsMesh);
-        if (cargos)
-            this.add(cargos);
-    }
-
-    public get icons() {
-        return this.iconsMesh.geometry;
-    }
-
-    public dispose() {
-        this.traverse(o => {
-            if (o instanceof Mesh) {
-                (o as Mesh).geometry.dispose();
-            }
-            if (o instanceof InstancedMesh) {
-                o.dispose();
-            }
-        });
-    }
-}
-
-const pos1 = new Vector3();
-const pos2 = new Vector3();
-const dir = new Vector3();
-const inserterHeight = 0.3;
-function inserterTrans(transforms: Matrix4[], trans: Matrix4) {
-	pos1.setFromMatrixPosition(transforms[0]);
-	dir.copy(pos1).normalize().multiplyScalar(inserterHeight);
-	pos1.add(dir);
-
-	pos2.setFromMatrixPosition(transforms[1]);
-	dir.copy(pos2).normalize().multiplyScalar(inserterHeight);
-	pos2.add(dir);
-
-	trans.setPosition(pos1.x, pos1.y, pos1.z);
-	trans.lookAt(pos1, pos2, pos1);
-	return dir.subVectors(pos1, pos2).length();
-}
-
-function buildingIconId(b: BlueprintBuilding) {
-    return b.recipeId > 0 ? recipeIconId(b.recipeId) : itemIconId(b.itemId);
-}
-
-const scale3 = new Vector3();
-const trans = new Matrix4();
-function buildingIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3, scale: Vector2) {
-    const meta = buildingMeta.get(b.modelIndex);
-    if (meta === undefined)
-        return false;  // TODO: unknown building, print warning
-    trans.multiplyMatrices(buildingTrans, meta.iconTrans);
-    scale3.setFromMatrixScale(trans);
-    scale.set(scale3.x, scale3.y);
-    pos.setFromMatrixPosition(trans);
-    return true;
-}
-
-const beltIconScale = new Vector2(1.1, 1.1);
-const beltIconTrans = new Matrix4().makeTranslation(0., 0., 0.5);
-function beltIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
-    trans.multiplyMatrices(buildingTrans, beltIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-const sorterIconScale = new Vector2(0.8, 0.8);
-const sorterIconTrans = new Matrix4().makeTranslation(0., 0., inserterHeight);
-function sorterIconPos(b: BlueprintBuilding, buildingTrans: Matrix4, pos: Vector3) {
-    trans.multiplyMatrices(buildingTrans, sorterIconTrans);
-    pos.setFromMatrixPosition(trans);
-}
-
-function buildBuildings(transforms: Matrix4[][], buildings: BlueprintBuilding[], renderer: WebGLRenderer) {
-	const buildBelts = (belts: BlueprintBuilding[]) => {
-		const thickness = 0.1;
-		const material = new MeshLambertMaterial();
-		const objects: Object3D[] = [];
-		{
-			const geometry = new CylinderGeometry(0.32, 0.32, thickness, 8);
-			const mesh = new InstancedMesh(geometry, material, belts.length);
-			const offset = new Matrix4().makeRotationX(Math.PI / 2);
-			offset.premultiply(new Matrix4().makeTranslation(0, 0, thickness / 2));
-			const trans = new Matrix4();
-			for (let i = 0; i < belts.length; i++) {
-				const b = belts[i];
-				trans.copy(transforms[b.index][0]);
-				trans.multiply(offset);
-				mesh.setMatrixAt(i, trans);
-				mesh.setColorAt(i, buildingMeta.get(b.modelIndex)!.color);
-				modelRef[b.index] = { mesh, instance: i };
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-			mesh.instanceColor!.needsUpdate = true;
-			objects.push(mesh);
-		}
-		const linkThickness = 0.6 * thickness;
-		{ // links
-			const geometry = new BoxGeometry(0.15, linkThickness, 1.0);
-			const mesh = new InstancedMesh(geometry, material, belts.length);
-			let numLinks = 0;
-			const offset = new Matrix4().makeTranslation(0, linkThickness / 2, -0.5);
-			const pos1 = new Vector3();
-			const pos2 = new Vector3();
-			const dir = new Vector3();
-			const temp = new Matrix4();
-			const trans = new Matrix4();
-			for (let i = 0; i < belts.length; i++) {
-				const b1 = belts[i];
-				if (b1.outputObjIdx < 0)
-					continue;
-				pos1.setFromMatrixPosition(transforms[b1.index][0]);
-				pos2.setFromMatrixPosition(transforms[b1.outputObjIdx][0]);
-				const len = dir.subVectors(pos1, pos2).length();
-				trans.identity();
-				trans.lookAt(pos1, pos2, pos1);
-				trans.premultiply(temp.makeTranslation(pos1.x, pos1.y, pos1.z));
-
-				const color = buildingMeta.get(b1.modelIndex)!.color;
-				addCargo(trans, color, len);
-
-				trans.multiply(temp.makeScale(1., 1., len));
-				trans.multiply(offset);
-				mesh.setMatrixAt(numLinks, trans);
-				mesh.setColorAt(numLinks, color);
-				numLinks++;
-			}
-			if (numLinks) {
-				mesh.count = numLinks;
-				mesh.instanceMatrix.needsUpdate = true;
-				mesh.instanceColor!.needsUpdate = true;
-				objects.push(mesh);
-			}
-		}
-		return objects;
-	}
-	const buildInserters = (inserters: BlueprintBuilding[]) => {
-		const inserterThickness = 0.06;
-		const geometry = new BoxGeometry(0.15, inserterThickness, 1.0);
-		const material = new MeshLambertMaterial();
-		const mesh = new InstancedMesh(geometry, material, inserters.length);
-		const offset = new Matrix4().makeTranslation(0, 0, -0.5);
-		const temp = new Matrix4();
-		const trans = new Matrix4();
-		for (let i = 0; i < inserters.length; i++) {
-			const b = inserters[i];
-
-			const len = inserterTrans(transforms[b.index], trans);
-			const color = buildingMeta.get(b.modelIndex)!.color;
-			addCargo(trans, color, len);
-
-			trans.multiply(temp.makeScale(1., 1., len));
-			trans.multiply(offset);
-			mesh.setMatrixAt(i, trans);
-			mesh.setColorAt(i, color);
-			modelRef[b.index] = { mesh, instance: i };
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		mesh.instanceColor!.needsUpdate = true;
-		return [mesh];
-	}
-	const buildBoxes = (boxes: BlueprintBuilding[]) => {
-		const geometry = new BoxGeometry(1.0, 1.0, 1.0);
-		const material = new MeshLambertMaterial();
-		const mesh = new InstancedMesh(geometry, material, boxes.length);
-		const trans = new Matrix4();
-		for (let i = 0; i < boxes.length; i++) {
-			const b = boxes[i];
-			const meta = buildingMeta.get(b.modelIndex);
-			if (meta === undefined)
-				continue
-			trans.multiplyMatrices(transforms[b.index][0], meta.unitBoxTrans);
-			mesh.setMatrixAt(i, trans);
-			mesh.setColorAt(i, meta.color);
-			modelRef[b.index] = { mesh, instance: i };
-		}
-		mesh.instanceMatrix.needsUpdate = true;
-		mesh.instanceColor!.needsUpdate = true;
-		return [mesh];
-	}
-	const buildIcons = (iconBuildings: BlueprintBuilding[], iconBelts: BlueprintBuilding[], iconInsterters: BlueprintBuilding[]) => {
-		const subscripts = new Map<BlueprintBuilding, string>();
-		for (const b of iconBelts) {
-			if (b.parameters === null)
-				continue;
-			const p = b.parameters as BeltParameters;
-			if (p.count === 0)
-				continue;
-			let s;
-			if (p.count >= 100000)
-				s = Math.floor(p.count / 1000).toFixed(0) + 'k';
-			else
-				s = p.count.toFixed(0);
-			subscripts.set(b, s);
-		}
-
-		const count = iconBuildings.length + iconBelts.length + iconInsterters.length;
-		const icons = new IconGeometry(count);
-
-		let subscriptsMesh: null | IconSubscript = null;
-		if (subscripts.size > 0) {
-			let numChars = 0;
-			for (const s of subscripts.values()) {
-				numChars += s.length;
-			}
-			subscriptsMesh = new IconSubscript(numChars);
-		}
-		const pos = new Vector3();
-
-		let subscriptIdx = 0;
-		for (let i = 0; i < iconBelts.length; i++) {
-            const b = iconBelts[i];
-            beltIconPos(b, transforms[b.index][0], pos);
-			const iconId = iconTexture.requestIcon((b.parameters as BeltParameters).iconId);
-			icons.addIcon(b, iconId, pos, beltIconScale);
-
-			const sub = subscripts.get(b);
-			if (sub !== undefined) {
-				subscriptsMesh!.setText(subscriptIdx, pos, beltIconScale, sub);
-				subscriptIdx += sub.length;
-			}
-		}
-
-		for (let i = 0; i < iconInsterters.length; i++) {
-			const b = iconInsterters[i];
-            sorterIconPos(b, transforms[b.index][0], pos);
-            const iconId = iconTexture.requestIcon(itemIconId(b.filterId));
-			icons.addIcon(b, iconId, pos, sorterIconScale);
-		}
-
-		const buildingIconScale = new Vector2();
-		for (let i = 0; i < iconBuildings.length; i++) {
-            const b = iconBuildings[i];
-			if (!buildingIconPos(b, transforms[b.index][0], pos, buildingIconScale))
-				continue
-			const iconId = iconTexture.requestIcon(buildingIconId(b));
-			icons.addIcon(b, iconId, pos, buildingIconScale);
-		}
-
-		if (subscriptsMesh !== null) {
-			subscriptsMesh.needsUpdate();
-		}
-		return [icons, subscriptsMesh] as const;
-	}
-
-	const belts = buildings.filter(b => isBelt(b.itemId));
-    const inserters = buildings.filter(b => isInserter(b.itemId));
-
-	const boxes = buildings.filter(b => !isInserter(b.itemId) && !isBelt(b.itemId));
-
-    const iconBuildings = boxes.filter(b => !noIconBuildings.has(b.itemId));
-	const iconBelts = belts.filter(b => b.parameters && (b.parameters as BeltParameters).iconId > 0);
-	const iconInsterters = inserters.filter(b => b.filterId > 0);
-
-	const modelRef = new Array<{ mesh: InstancedMesh, instance: number }>(buildings.length);
-	const cargosMesh = new Cargos(belts.length + inserters.length);
-	let numCargos = 0;
-	const addCargo = (trans: Matrix4, color: Color, distance: number) => {
-		cargosMesh.setMatrixAt(numCargos, trans);
-		cargosMesh.setColorAt(numCargos, color);
-		cargosMesh.setCargoDistanceAt(numCargos, distance);
-		numCargos++;
-	}
-
-    const meshes: Object3D[] = [];
-	if (belts.length)
-		meshes.push(...buildBelts(belts));
-
-	if (inserters.length)
-		meshes.push(...buildInserters(inserters));
-
-	if (numCargos) {
-		cargosMesh.count = numCargos;
-		cargosMesh.instanceMatrix.needsUpdate = true;
-		cargosMesh.instanceColor!.needsUpdate = true;
-		cargosMesh.geometry.cargoDistance.needsUpdate = true;
-	}
-
-	if (boxes.length)
-		meshes.push(...buildBoxes(boxes));
-
-    const iconTexture = new IconTexture(renderer);
-	const [icons, subscriptsMesh] = buildIcons(iconBuildings, iconBelts, iconInsterters)
-    if (subscriptsMesh) {
-        subscriptsMesh.renderOrder = 11;
-        meshes.push(subscriptsMesh);
-    }
-
-    const iconMesh = new Icons(iconTexture.texture, icons);
-    iconMesh.renderOrder = 10;
-
-	return new AllBuildings(meshes, iconMesh, iconTexture, cargosMesh, modelRef);
-}
-
-function buildBVH(transforms: Matrix4[][], buildings: BlueprintBuilding[]) {
-	const temp = new Matrix4();
-	const inserterOffset = new Matrix4().makeTranslation(0, 0, -0.5);
-
-	const selectBoxes = buildings.map((b, i) => {
-		const meta = buildingMeta.get(b.modelIndex)!;
-		const box = new Matrix4();
-		if (isInserter(b.itemId)) {
-			const len = inserterTrans(transforms[i], box);
-			box.multiply(temp.makeScale(0.5, 0.5, len));
-			box.multiply(inserterOffset);
-		} else {
-			box.multiplyMatrices(transforms[i][0], meta.selectUnitBoxTrans);
-		}
-		return box;
-	});
-	return new BVH(selectBoxes);
-}
-
-function registerUpdater(updater: Updater, buildings: AllBuildings, posBP: PositionedBlueprint) {
-    updater.updateBuildingIcon.on(b => {
-        const iconId = buildings.iconTexture.requestIcon(buildingIconId(b));
-        buildings.icons.updateIconId(b, iconId);
-    });
-
-    updater.updateBeltIcon.on(b => {
-        const iconId = b.parameters ? buildings.iconTexture.requestIcon((b.parameters as BeltParameters).iconId) : 0;
-        const icons = buildings.icons;
-        if (icons.hasIcon(b)) {
-            icons.updateIconId(b, iconId);
-        } else if (iconId != 0) {
-            const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b)
-            beltIconPos(b, trans[0], pos)
-            icons.addIcon(b, iconId, pos, beltIconScale, true);
-        }
-    });
-
-    updater.updateBeltIconSubscript.on(() => { throw new Error('Method not implemented.') });
-    updater.updateSorterIcon.on(b => {
-        const iconId = buildings.iconTexture.requestIcon(itemIconId(b.filterId));
-        const icons = buildings.icons;
-        if (icons.hasIcon(b)) {
-            icons.updateIconId(b, iconId);
-        } else if (iconId != 0) {
-            const pos = new Vector3();
-            const trans = calcBuildingTrans(R, posBP, b)
-            sorterIconPos(b, trans[0], pos)
-            icons.addIcon(b, iconId, pos, sorterIconScale, true);
-        }
-    });
-}
-
 const R = 200.2;
 const SEGMENT = 200;
-
+/** "对准蓝图"的俯仰角；蓝图大到要拉得很远时改为正俯视 */
+const FRAME_TILT = 40 / 180 * Math.PI;
+const FLATTEN_BEYOND = R * 0.6;
+const CLICK_SLOP = 5;
 </script>
 
 <script setup lang="ts">
-import { ref, onMounted, Ref, onUnmounted, watchEffect, computed, inject } from 'vue'
-import { Scene, PerspectiveCamera, SphereGeometry, AmbientLight } from 'three';
+import { ref, reactive, onMounted, Ref, onUnmounted, watchEffect, computed, inject, watch, nextTick, shallowRef, toRaw } from 'vue';
+import { useI18n } from 'vue-i18n';
+import {
+	Scene, PerspectiveCamera, SphereGeometry, Mesh, MeshStandardMaterial, WebGLRenderer, DirectionalLight,
+	HemisphereLight, Matrix4, Object3D, Vector3,
+} from 'three';
 import { PlanetMapControls } from '@/PlanetMapControls';
 import { attachCamera, attachRenderer } from '@/utils';
+import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
+import { commandQueueKey } from '@/define';
+import { sessionKey } from '@/open/keys';
+import { DisplayMode, browserConnection, defaultSettings, resolveDisplayMode, settingsKey } from '@/settings';
+import { itemName, recipeName } from '@/i18n';
+import { LayerInstance, layerRegistry, layerVisibility, ViewState } from '@/render/layers';
+import { buildBadges, registerIconUpdater } from '@/render/core/badges';
+import { buildBVH, pickBuilding } from '@/render/core/pick';
+import { blueprintBoundsPoints, frameBounds } from '@/render/core/framing';
+import { CameraRig } from '@/render/core/cameraRig';
+import { SelectionMarker } from '@/render/core/selection';
+import { HighlightFilter, highlightMask } from '@/render/core/filter';
+import { TIER_HEX } from '@/render/core/tiers';
 
 const props = defineProps<{
   selectedBuildingIndex: number | null,
@@ -419,20 +115,56 @@ const emit = defineEmits<{
   (e: 'update:selectedBuildingIndex', index: number | null): void
 }>()
 
+const { t } = useI18n();
+const settings = inject(settingsKey, () => reactive(defaultSettings()), true);
+const session = inject(sessionKey, null);
+const commandQueue = inject(commandQueueKey)!;
+
+const tiers = ([1, 2, 3] as const).map(k => ({
+	name: `Mk.${'I'.repeat(k)}`,
+	color: `#${TIER_HEX[k].toString(16).padStart(6, '0')}`,
+}));
+
+// ───────── 减少动态效果 ─────────
+const motionQuery = typeof matchMedia === 'undefined' ? null : matchMedia('(prefers-reduced-motion: reduce)');
+const reducedMotion = ref(motionQuery?.matches ?? false);
+const onMotionChange = (e: MediaQueryListEvent) => { reducedMotion.value = e.matches; };
+motionQuery?.addEventListener('change', onMotionChange);
+onUnmounted(() => motionQuery?.removeEventListener('change', onMotionChange));
+
+const flowOn = computed(() => settings.flow && !reducedMotion.value);
+const view: ViewState = reactive({ flow: true, badges: true, reducedMotion: false });
+watchEffect(() => {
+	view.flow = flowOn.value;
+	view.badges = settings.badges;
+	view.reducedMotion = reducedMotion.value;
+});
+
+// ───────── 场景 ─────────
 const scene = new Scene();
-scene.add(new AmbientLight(0xffffff, 0.3));
-const dirLight = new DirectionalLight(0xffffff, 2);
-scene.add(dirLight);
+const hemiLight = new HemisphereLight(0xCFE3FF, 0x0D1828, 1.1);
+scene.add(hemiLight);
+const sun = new DirectionalLight(0xFFF1DE, 2.2);
+const sunTarget = new Object3D();
+sun.target = sunTarget;
+scene.add(sun, sunTarget);
 {
 	const geometry = new SphereGeometry(R, SEGMENT, SEGMENT / 2);
-	const material = new MeshStandardMaterial( { color: 0xb0b0b0 } );
+	const material = new MeshStandardMaterial( { color: 0x223349, roughness: 1 } );
 	const planet = new Mesh(geometry, material);
 	scene.add(planet);
 }
-scene.add(buildPlanetGrid(R * 1.0001, SEGMENT));
+const planetGrid = buildPlanetGrid(R * 1.0001, SEGMENT);
+scene.add(planetGrid);
+watchEffect(() => { planetGrid.visible = settings.grid; });
+
+const selection = new SelectionMarker();
+scene.add(selection.group);
 
 const root: Ref<HTMLDivElement | null> = ref(null);
-const renderer = new WebGLRenderer({ antialias: true });
+// preserveDrawingBuffer：截图时画布内容仍在
+const renderer = new WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0);
 attachRenderer(root, renderer);
 
 const camera = new PerspectiveCamera(50);
@@ -441,134 +173,600 @@ camera.far = 3000;
 camera.position.z = 2 * R;
 attachCamera(root, camera);
 
-const commandQueue = inject(commandQueueKey)!;
+// ───────── 每个蓝图的图层 ─────────
+interface Built {
+	root: Group;
+	layers: LayerInstance[];
+	badges: ReturnType<typeof buildBadges>;
+	bvh: ReturnType<typeof buildBVH>;
+	transforms: Matrix4[][];
+	bounds: Vector3[];
+	/** 有编辑命令分发了图标/物流站更新事件，下一帧通知图层 dataChanged */
+	edited: { pending: boolean };
+}
 
-const b = computed(() => {
+const b = computed<Built | null>(() => {
 	if (!commandQueue.value)
 		return null;
-    const d = commandQueue.value.data;
+	const d = commandQueue.value.data;
 	const pos = findPosForAreas(d.areas, SEGMENT);
 	const transforms = d.buildings.map(b => calcBuildingTrans(R, pos, b));
-	const buildings = buildBuildings(transforms, d.buildings, renderer)
-    const bvh = buildBVH(transforms, d.buildings);
-    registerUpdater(commandQueue.value.updater, buildings, pos);
-	return { buildings, bvh };
+	const group = new Group();
+	const badges = buildBadges(renderer, d.buildings, transforms);
+	const layers = layerRegistry.map(entry => {
+		const layer = entry.create();
+		const layerRoot = new Group();
+		layerRoot.name = entry.id;
+		group.add(layerRoot);
+		layer.build({
+			root: layerRoot, renderer, camera, R, data: d, buildings: d.buildings, transforms,
+			// 传原始对象：build 里读取显示状态不应让这个 computed 依赖它
+			icons: badges.icons, iconTexture: badges.iconTexture, view: toRaw(view),
+		});
+		return { entry, layer };
+	});
+	group.add(badges.group);
+	const updater = commandQueue.value.updater;
+	registerIconUpdater(updater, badges, R, pos);
+	// 合并进上一条的命令不会增加 execVersion，所以直接听更新事件；一帧内的多个事件合并成一次
+	const edited = { pending: false };
+	for (const e of [updater.updateBuildingIcon, updater.updateBeltIcon, updater.updateSorterIcon, updater.updateStationInfo])
+		e.on(() => { edited.pending = true; });
+	return {
+		root: group, layers, badges, transforms, edited,
+		bvh: buildBVH(transforms, d.buildings),
+		bounds: blueprintBoundsPoints(d.buildings, transforms),
+	};
 });
+const loaded = computed(() => b.value !== null);
 
 watchEffect(onCleanUp => {
-	if (b.value !== null) {
-		const buildings = b.value.buildings
-		scene.add(buildings);
-		onCleanUp(() => {
-            scene.remove(buildings);
-            buildings.dispose();
-        });
-	}
+	const built = b.value;
+	if (built === null)
+		return;
+	scene.add(built.root);
+	onCleanUp(() => {
+		scene.remove(built.root);
+		for (const { layer } of built.layers)
+			layer.dispose();
+		built.badges.dispose();
+	});
 });
 
-{
-	const geometry = new BoxGeometry(1., 1., 1.);
-	const material = new MeshStandardMaterial({
-		color: 0x0074E8,
-		opacity: 0.5,
-		transparent: true,
-		depthWrite: false,
+// ───────── 显示模式 ─────────
+const mode = ref<DisplayMode>(resolveDisplayMode(browserConnection(), settings));
+const setMode = (m: DisplayMode) => {
+	mode.value = m;
+	settings.viewMode = m;
+};
+let shownVisibility: boolean[] = [];
+const applyVisibility = (built: Built) => {
+	const vis = layerVisibility(built.layers, mode.value);
+	vis.forEach((v, i) => {
+		if (shownVisibility[i] !== v)
+			built.layers[i].layer.setVisible(v);
 	});
-	const selectBox = new Mesh(geometry, material);
-	selectBox.matrixAutoUpdate = false;
-	watchEffect(() => {
-		if (b.value === null || props.selectedBuildingIndex === null) {
-			scene.remove(selectBox);
+	shownVisibility = vis;
+};
+watch(b, () => { shownVisibility = []; });
+watchEffect(() => {
+	if (b.value)
+		b.value.badges.group.visible = settings.badges;
+});
+
+// ───────── 悬停 / 选中 / 高亮 ─────────
+const hovered = ref<number | null>(null);
+/** selectAll 选中的同类建筑（描边，无光环） */
+const multi = shallowRef<ReadonlySet<number>>(new Set());
+const filter = shallowRef<HighlightFilter>(null);
+
+watchEffect(() => {
+	const built = b.value;
+	if (!built)
+		return;
+	for (const { layer } of built.layers)
+		layer.setHover?.(hovered.value);
+});
+watchEffect(() => {
+	const built = b.value;
+	const primary = props.selectedBuildingIndex;
+	if (!built || !commandQueue.value) {
+		selection.clear();
+		return;
+	}
+	const indices = new Set(multi.value);
+	if (primary !== null)
+		indices.add(primary);
+	selection.set(built.bvh.boxes, commandQueue.value.data.buildings, built.transforms, indices, primary);
+	for (const { layer } of built.layers)
+		layer.setSelected?.(indices);
+});
+watchEffect(() => {
+	const built = b.value;
+	if (!built || !commandQueue.value)
+		return;
+	const mask = highlightMask(commandQueue.value.data.buildings, filter.value);
+	for (const { layer } of built.layers)
+		layer.setHighlight?.(mask);
+	built.badges.icons.setDim(mask ? bd => !mask[bd.index] : null);
+});
+
+/** 高亮匹配的建筑并淡化其余建筑；传 null 取消。返回匹配的数量 */
+const highlight = (f: HighlightFilter) => {
+	filter.value = f;
+	const mask = commandQueue.value ? highlightMask(commandQueue.value.data.buildings, f) : null;
+	return mask ? mask.reduce((n, v) => n + v, 0) : 0;
+};
+
+/** 选中（描边）并高亮所有同类建筑，返回它们的 index */
+const selectAll = (itemId: number) => {
+	const buildings = commandQueue.value?.data.buildings ?? [];
+	const indices = buildings.filter(bd => bd.itemId === itemId).map(bd => bd.index);
+	multi.value = new Set(indices);
+	filter.value = indices.length ? { itemId } : null;
+	return indices;
+};
+
+const deselect = () => {
+	multi.value = new Set();
+	emit('update:selectedBuildingIndex', null);
+};
+
+// ───────── 相机 ─────────
+let rig: CameraRig | null = null;
+let controls: PlanetMapControls | null = null;
+
+const fit = (tilt: number) => {
+	const built = b.value;
+	if (!built || !rig || !controls || built.bounds.length === 0)
+		return false;
+	const f = frameBounds(built.bounds, {
+		R, fov: camera.fov, aspect: camera.aspect, tilt,
+		minDistance: controls.minDistance - R, maxDistance: controls.maxDistance - R,
+		flattenBeyond: FLATTEN_BEYOND,
+	});
+	rig.flyTo(f.base, f.tilt, reducedMotion.value);
+	return true;
+};
+/** 让相机框住整个蓝图（F）；减少动态效果时直接跳过去 */
+const frameBlueprint = () => fit(FRAME_TILT);
+/** 正俯视整个蓝图（T） */
+const topView = () => fit(0);
+
+let frameOnBuild = false;
+const offOpened = session?.onOpened(() => {
+	frameOnBuild = true;
+	hovered.value = null;
+	multi.value = new Set();
+	filter.value = null;
+	mode.value = resolveDisplayMode(browserConnection(), settings);
+	nextTick(() => {
+		if (frameOnBuild && rig)
+			frameOnBuild = !frameBlueprint();
+	});
+});
+onUnmounted(() => offOpened?.());
+
+// ───────── 截图 ─────────
+const screenshot = () => {
+	const src = renderer.domElement;
+	const canvas = document.createElement('canvas');
+	canvas.width = src.width;
+	canvas.height = src.height;
+	const ctx2d = canvas.getContext('2d');
+	if (!ctx2d)
+		return;
+	ctx2d.fillStyle = '#0E1726';
+	ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+	ctx2d.drawImage(src, 0, 0);
+	const name = (commandQueue.value?.data.header.shortDesc.trim() || 'blueprint') + '.png';
+	canvas.toBlob(blob => {
+		if (!blob)
 			return;
-		}
-		selectBox.matrix.copy(b.value.bvh.boxes[props.selectedBuildingIndex]);
-		scene.add(selectBox);
-	})
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = name;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 10000);
+	}, 'image/png');
+};
+
+// ───────── 画布描述（屏幕阅读器） ─────────
+const canvasLabel = computed(() => {
+	const d = commandQueue.value?.data;
+	if (!d)
+		return t('画布空');
+	const sel = props.selectedBuildingIndex === null ? undefined : d.buildings[props.selectedBuildingIndex];
+	const parts = [t('画布描述', { name: d.header.shortDesc.trim() || t('未命名'), count: d.buildings.length })];
+	if (sel)
+		parts.push(t('画布选中', { name: buildingLabel(sel.index) }));
+	return parts.join(' ');
+});
+watchEffect(() => {
+	renderer.domElement.setAttribute('aria-label', canvasLabel.value);
+});
+renderer.domElement.setAttribute('role', 'img');
+
+function buildingLabel(index: number) {
+	const bd = commandQueue.value?.data.buildings[index];
+	if (!bd)
+		return '';
+	return bd.recipeId > 0 ? `${itemName(bd.itemId)}：${recipeName(bd.recipeId)}` : itemName(bd.itemId);
 }
+
+const tip = reactive({ visible: false, x: 0, y: 0, text: '' });
 
 onMounted(() => {
 	const rootEl = root.value!;
+	const canvas = renderer.domElement;
 
-	const controls = new PlanetMapControls(camera, renderer.domElement);
+	controls = new PlanetMapControls(camera, canvas);
 	controls.listenToKeyEvents(rootEl);
 	controls.minDistance = R * 1.04;
 	controls.maxDistance = R * 4;
 	controls.targetRadius = R;
-	onUnmounted(() => controls.dispose());
 	controls.update();
+	rig = new CameraRig(camera, controls, R);
+	const onControlStart = () => rig?.stop();
+	controls.addEventListener('start', onControlStart);
+	onUnmounted(() => {
+		controls?.removeEventListener('start', onControlStart);
+		controls?.dispose();
+	});
+	// 渲染器是异步组件：可能在蓝图打开之后才挂载
+	if (b.value)
+		frameBlueprint();
 
-	const ray = new Ray();
-	const planetSphere = new Sphere(new Vector3(), R);
-	const v = new Vector3();
-	const onClick = (e: MouseEvent) => {
-		const pick = () => {
-			if (b.value === null)
-				return null;
-			ray.origin.setFromMatrixPosition(camera.matrixWorld);
-			const rect = renderer.domElement.getBoundingClientRect();
-			ray.direction.x = ((e.clientX - rect.left) / rect.width ) * 2 - 1;
-			ray.direction.y = -((e.clientY - rect.top) / rect.height ) * 2 + 1;
-			ray.direction.z = .5;
-			ray.direction.unproject(camera).sub(ray.origin).normalize();
-			const intersects = b.value.bvh.raycast(ray)
-			if (intersects.length === 0)
-				return null;
+	const pickAt = (e: { clientX: number, clientY: number }) => {
+		if (b.value === null)
+			return null;
+		const rect = canvas.getBoundingClientRect();
+		return pickBuilding(b.value.bvh, camera, R, (e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+	};
 
-			const intersectPlanet = ray.intersectSphere(planetSphere, v);
-			if (intersectPlanet !== null && intersectPlanet.distanceToSquared(ray.origin) < intersects[0].distanceSquared)
-				intersects.length = 0;
+	let downAt: [number, number] | null = null;
+	const onPointerDown = (e: PointerEvent) => {
+		downAt = e.button === 0 ? [e.clientX, e.clientY] : null;
+	};
+	const onPointerUp = (e: PointerEvent) => {
+		if (e.button !== 0 || downAt === null || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > CLICK_SLOP)
+			return;
+		downAt = null;
+		const picked = pickAt(e);
+		multi.value = new Set();
+		emit('update:selectedBuildingIndex', picked);
+	};
 
-			return intersects.length === 0 ? null : intersects[0].index
+	let pendingMove: PointerEvent | null = null;
+	const onPointerMove = (e: PointerEvent) => {
+		pendingMove = e;
+	};
+	const applyHover = () => {
+		const e = pendingMove;
+		if (e === null)
+			return;
+		pendingMove = null;
+		// 拖动、触摸时不显示悬停
+		const picked = e.buttons === 0 && e.pointerType !== 'touch' ? pickAt(e) : null;
+		hovered.value = picked;
+		canvas.style.cursor = picked === null ? '' : 'pointer';
+		if (picked === null) {
+			tip.visible = false;
+			return;
 		}
-		emit('update:selectedBuildingIndex', pick());
-	}
-	renderer.domElement.addEventListener('click', onClick);
-	onUnmounted(() => renderer.domElement.removeEventListener('click', onClick));
+		const rect = rootEl.getBoundingClientRect();
+		tip.x = e.clientX - rect.left;
+		tip.y = e.clientY - rect.top;
+		tip.text = buildingLabel(picked);
+		tip.visible = true;
+	};
+	const onPointerLeave = () => {
+		pendingMove = null;
+		hovered.value = null;
+		tip.visible = false;
+	};
+	canvas.addEventListener('pointerdown', onPointerDown);
+	canvas.addEventListener('pointerup', onPointerUp);
+	canvas.addEventListener('pointermove', onPointerMove);
+	canvas.addEventListener('pointerleave', onPointerLeave);
+	onUnmounted(() => {
+		canvas.removeEventListener('pointerdown', onPointerDown);
+		canvas.removeEventListener('pointerup', onPointerUp);
+		canvas.removeEventListener('pointermove', onPointerMove);
+		canvas.removeEventListener('pointerleave', onPointerLeave);
+	});
+
+	const onKeyDown = (e: KeyboardEvent) => {
+		if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || b.value === null)
+			return;
+		const target = e.target as HTMLElement | null;
+		if (target?.closest?.('input, textarea, select, [contenteditable="true"], dialog, [role="dialog"]'))
+			return;
+		if (e.key === 'Escape') {
+			deselect();
+		} else if (e.key === 'f' || e.key === 'F') {
+			frameBlueprint();
+		} else if (e.key === 't' || e.key === 'T') {
+			topView();
+		}
+	};
+	window.addEventListener('keydown', onKeyDown);
+	onUnmounted(() => window.removeEventListener('keydown', onKeyDown));
 
 	let mounted = true;
 	onUnmounted(() => { mounted = false; });
-	let lastTimeStamp : number | null = null
+	let lastTimeStamp: number | null = null;
 	function animate(time: number) {
 		if (!mounted)
 			return;
-		if (lastTimeStamp) {
-			controls.updateTimeDelta((time - lastTimeStamp) / 1000);
-		}
-		if (b.value?.buildings.cargos)
-			b.value.buildings.cargos.cargoMove = (time % 1000) / 1000;
-		lastTimeStamp = time;
 		requestAnimationFrame(animate);
-		const cameraUpdated = controls.update();
-		dirLight.position.copy(camera.position);
-		renderer.render(scene, camera);
-		if (cameraUpdated) {
-			cameraPosVersion.value++;
+		const dt = lastTimeStamp === null ? 0 : Math.min((time - lastTimeStamp) / 1000, 0.1);
+		lastTimeStamp = time;
+		controls!.updateTimeDelta(dt);
+
+		const built = b.value;
+		if (built) {
+			if (frameOnBuild)
+				frameOnBuild = !frameBlueprint();
+			applyVisibility(built);
+			if (built.edited.pending) {
+				built.edited.pending = false;
+				for (const { layer } of built.layers)
+					layer.dataChanged?.();
+			}
 		}
+		applyHover();
+		selection.update(dt, reducedMotion.value);
+
+		const { changed, pose } = rig!.update(dt);
+		// 图层按这一帧的相机位姿分配 LOD、剔除重叠标记
+		if (built) {
+			for (const { layer } of built.layers)
+				layer.update(dt);
+		}
+		// 天光朝注视点的法线，太阳从相机一侧（东南）斜照，朝向相机的面才亮
+		hemiLight.position.copy(pose.normal);
+		sunTarget.position.copy(pose.target);
+		sun.position.copy(pose.target)
+			.addScaledVector(pose.normal, 100).addScaledVector(pose.east, 45).addScaledVector(pose.north, -60);
+		renderer.render(scene, camera);
+		if (changed)
+			cameraPosVersion.value++;
 	}
 	requestAnimationFrame(animate);
 });
 
+onUnmounted(() => selection.dispose());
+
 const selectBoxes = computed(() => b.value?.bvh.boxes);
 const cameraPosVersion = ref(0);
 const getModel = (index: number) => {
-	if (b.value === null)
-		return null
-	const ref = b.value.buildings.modelRef[index]
-	const m = new Matrix4();
-	ref.mesh.getMatrixAt(ref.instance, m)
-	return m;
+	const built = b.value;
+	if (built === null)
+		return null;
+	for (const { layer } of built.layers) {
+		const m = layer.modelOf?.(index);
+		if (m)
+			return m;
+	}
+	return null;
 }
 defineExpose({
 	selectBoxes,
 	camera,
 	cameraPosVersion,
-    getModel,
+	getModel,
+	highlight,
+	selectAll,
+	frameBlueprint,
 });
 </script>
 
 <style lang="scss">
 .editor-root {
+	position: relative;
 	width: 100%;
 	height: 100%;
+	outline: none;
+
+	canvas {
+		display: block;
+	}
+}
+
+.view-tools {
+	position: absolute;
+	left: 16px;
+	bottom: 16px;
+	display: flex;
+	gap: 6px;
+	z-index: 3;
+}
+
+.view-tools .tool, .tool-shot {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 34px;
+	padding: 0 12px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: rgba(18, 30, 48, .86);
+	backdrop-filter: blur(6px);
+	cursor: pointer;
+	font-size: 13px;
+	color: var(--text);
+
+	&:hover:not(:disabled) {
+		border-color: var(--line-2);
+		background: rgba(25, 41, 64, .92);
+	}
+	&[aria-pressed="true"] {
+		border-color: var(--holo);
+		color: var(--holo);
+	}
+	&:disabled {
+		cursor: default;
+		opacity: .55;
+	}
+	svg {
+		width: 16px;
+		height: 16px;
+		flex: none;
+	}
+}
+
+.tool-shot {
+	position: absolute;
+	right: 16px;
+	top: 16px;
+	z-index: 3;
+}
+
+.mode-seg {
+	display: inline-flex;
+	height: 34px;
+	padding: 3px;
+	gap: 2px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: rgba(18, 30, 48, .86);
+	backdrop-filter: blur(6px);
+
+	button {
+		border: 0;
+		border-radius: 6px;
+		padding: 0 12px;
+		background: transparent;
+		color: var(--muted);
+		cursor: pointer;
+		font-size: 13px;
+		white-space: nowrap;
+
+		&[aria-pressed="true"] {
+			background: var(--panel-3);
+			color: var(--text);
+			box-shadow: inset 0 0 0 1px var(--line-2);
+		}
+	}
+}
+
+.legend {
+	position: absolute;
+	right: 16px;
+	bottom: 16px;
+	display: flex;
+	gap: 14px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	background: rgba(18, 30, 48, .72);
+	font: 12px var(--num);
+	color: var(--muted);
+	z-index: 3;
+
+	span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	i {
+		width: 14px;
+		height: 4px;
+		border-radius: 2px;
+	}
+}
+
+.hover-tip {
+	position: absolute;
+	pointer-events: none;
+	padding: 4px 8px;
+	border-radius: 6px;
+	background: rgba(8, 16, 27, .9);
+	border: 1px solid var(--line);
+	font-size: 12px;
+	color: var(--text);
+	white-space: nowrap;
+	transform: translate(12px, 12px);
+	z-index: 4;
+}
+
+// 手机：工具栏只显示图标，避开底部抽屉露出的部分
+@media (max-width: 760px) {
+	.view-tools {
+		left: 10px;
+		bottom: calc(var(--sheet-peek) + 10px);
+		.label {
+			display: none;
+		}
+		.tool {
+			padding: 0 9px;
+		}
+	}
+	.tool-shot {
+		right: 10px;
+		top: 10px;
+		.label {
+			display: none;
+		}
+	}
+	// 图例移到左上角（右上角是截图按钮）
+	.legend {
+		left: 10px;
+		top: 10px;
+		right: auto;
+		bottom: auto;
+	}
 }
 </style>
+
+<i18n>
+{
+    "zh": {
+        "视图工具": "视图工具",
+        "显示模式": "显示模式",
+        "精简": "精简",
+        "精简说明": "方盒加配方图标，不下载模型，打开最快",
+        "真实模型": "真实模型",
+        "真实模型说明": "游戏真实模型",
+        "对准蓝图": "对准蓝图",
+        "俯视": "俯视",
+        "配方标记": "配方标记",
+        "配方标记说明": "在建筑上方显示配方标记",
+        "流向": "流向",
+        "流向说明": "传送带流向动画",
+        "流向已停": "系统设置了减少动态效果，流向动画已停止",
+        "截图": "截图",
+        "截图说明": "把当前视图保存为图片",
+        "等级图例": "颜色图例：传送带、分拣器和建筑饰条的等级",
+        "画布空": "蓝图三维预览：尚未打开蓝图",
+        "画布描述": "蓝图「{name}」的三维预览，共 {count} 个建筑。拖动旋转，滚轮缩放，点击建筑查看详情，F 对准蓝图，T 俯视，Esc 取消选中。",
+        "画布选中": "已选中：{name}。",
+        "未命名": "未命名"
+    },
+    "en": {
+        "视图工具": "View tools",
+        "显示模式": "Display mode",
+        "精简": "Simple",
+        "精简说明": "Boxes with recipe icons; no model download, fastest to open",
+        "真实模型": "Real model",
+        "真实模型说明": "The game's real models",
+        "对准蓝图": "Frame blueprint",
+        "俯视": "Top view",
+        "配方标记": "Recipe badges",
+        "配方标记说明": "Show recipe badges on buildings",
+        "流向": "Flow",
+        "流向说明": "Belt flow animation",
+        "流向已停": "Flow animation is off because the system asks for reduced motion",
+        "截图": "Screenshot",
+        "截图说明": "Save the current view as an image",
+        "等级图例": "Colour legend: tier of belts, sorters and building trims",
+        "画布空": "Blueprint 3D preview: no blueprint open",
+        "画布描述": "3D preview of blueprint \"{name}\" with {count} buildings. Drag to rotate, scroll to zoom, click a building for details, F to frame, T for top view, Esc to deselect.",
+        "画布选中": "Selected: {name}.",
+        "未命名": "Untitled"
+    }
+}
+</i18n>

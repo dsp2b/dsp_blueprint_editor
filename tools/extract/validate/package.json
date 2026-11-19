@@ -1,0 +1,10 @@
+{
+  "name": "dsp-extract-glb-validate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Khronos glTF Validator runner for the GLB files written by tools/extract models",
+  "type": "module",
+  "dependencies": {
+    "gltf-validator": "2.0.0-dev.3.10"
+  }
+}

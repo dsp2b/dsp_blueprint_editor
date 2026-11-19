@@ -1,0 +1,10 @@
+# Runtime dependencies of the extraction tool (Python 3.12).
+UnityPy==1.25.4
+TypeTreeGeneratorAPI==0.0.10
+# PNG bytes depend on the Pillow/zlib build; pinned so re-runs stay byte-identical.
+Pillow==13.0.0
+# GLB bytes come from numpy array tobytes()/float rounding; pinned with the same goal.
+numpy==2.5.5
+# Texture decoders UnityPy uses for compressed icons/textures; they decide the decoded pixels.
+texture2ddecoder==1.0.6
+astc-encoder-py==0.1.12

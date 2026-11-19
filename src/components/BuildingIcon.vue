@@ -17,8 +17,16 @@ const props = defineProps<{
 
 const src = ref('');
 watchEffect(async () => {
+    const id = props.iconId;
     src.value = '';
-    src.value = await iconUrl(props.iconId);
+    let url = '';
+    try {
+        url = await iconUrl(id);
+    } catch {
+        // 游戏里不存在的图标 id（例如激光灯塔、新版本的物品）不显示图片
+    }
+    if (id === props.iconId)
+        src.value = url;
 });
 </script>
 

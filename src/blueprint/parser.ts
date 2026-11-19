@@ -807,7 +807,142 @@ const unknownParamParser: ParamParser<UnknownParamerters> = {
     },
 }
 
-type AllParameters = AssembleParamerters | StationParameters | AdvancedMiningMachineParameters |
+/** 激光灯塔（Marker）参数，布局见 BuildingParameters 的 Marker 分支 */
+export interface MarkerParameters {
+    color: number;
+    height: number;
+    radius: number;
+    visibility: number;
+    detailLevel: number;
+    icon: number;
+    digitalSignalId: number;
+    dfAttractionFlags: number;
+    /** 注释每个字符的颜色索引，长度即注释长度（参数 [47]） */
+    contentColorIndex: number[];
+    /** 完整参数块的拷贝，保证未解析的槽位导出时不丢失 */
+    raw: Int32Array;
+}
+
+const MARKER_COMMENT_LENGTH = 47;
+const MARKER_COMMENT_COLORS = 48;
+
+const markerParamParser: ParamParser<MarkerParameters> = {
+    encodedSize(p) { return p.raw.length; },
+    encode(p, a) {
+        for (let i = 0; i < p.raw.length; i++)
+            setParam(a, i, p.raw[i]);
+        setParam(a, 0, p.color);
+        setParam(a, 1, Math.round(p.height * 100));
+        setParam(a, 2, Math.round(p.radius * 100));
+        setParam(a, 3, p.visibility);
+        setParam(a, 4, p.detailLevel);
+        setParam(a, 5, p.icon);
+        setParam(a, 6, p.digitalSignalId);
+        setParam(a, 7, p.dfAttractionFlags);
+        const n = p.contentColorIndex.length;
+        setParam(a, MARKER_COMMENT_LENGTH, n);
+        for (let i = 0; i < n; i++)
+            setParam(a, MARKER_COMMENT_COLORS + i, p.contentColorIndex[i]);
+    },
+    decode(a) {
+        const raw = new Int32Array(a.byteLength / Int32Array.BYTES_PER_ELEMENT);
+        for (let i = 0; i < raw.length; i++)
+            raw[i] = getParam(a, i);
+        const n = Math.max(0, Math.min(getParam(a, MARKER_COMMENT_LENGTH), raw.length - MARKER_COMMENT_COLORS));
+        const contentColorIndex: number[] = [];
+        for (let i = 0; i < n; i++)
+            contentColorIndex.push(raw[MARKER_COMMENT_COLORS + i]);
+        return {
+            color: raw[0],
+            height: raw[1] / 100,
+            radius: raw[2] / 100,
+            visibility: raw[3],
+            detailLevel: raw[4],
+            icon: raw[5],
+            digitalSignalId: raw[6],
+            dfAttractionFlags: raw[7],
+            contentColorIndex,
+            raw,
+        };
+    },
+}
+
+/** 轨道采集器：按 station 布局解析；全 0 参数块（游戏不写入任何内容）原样保留 */
+export interface CollectorParameters extends StationParameters {
+    /** 参数块全为 0 时为 true，此时导出写回全 0，面板不显示 */
+    allZero: boolean;
+    /** 原始参数块的 int32 数量 */
+    length: number;
+}
+
+function collectorParamParser(): ParamParser<CollectorParameters> {
+    const station = stationParamsParser(stationDesc);
+    return {
+        encodedSize(p) { return p.allZero ? p.length : station.encodedSize(p); },
+        encode(p, a) {
+            if (p.allZero) {
+                for (let i = 0; i < p.length; i++)
+                    setParam(a, i, 0);
+                return;
+            }
+            station.encode(p, a);
+        },
+        decode(a) {
+            const length = a.byteLength / Int32Array.BYTES_PER_ELEMENT;
+            let allZero = true;
+            for (let i = 0; i < length && allZero; i++)
+                allZero = getParam(a, i) === 0;
+            // 全 0 时用 2048 个 0 解出占位字段，避免短数据段报错
+            const view = allZero ? new DataView(new ArrayBuffer(2048 * Int32Array.BYTES_PER_ELEMENT)) : a;
+            return { ...station.decode(view), allZero, length };
+        },
+    };
+}
+
+const MARKER_CONTENT_SPLITTER = '\n';
+
+export interface MarkerContent {
+    word: string;
+    tags: string;
+    name: string;
+    comment: string;
+}
+
+function contentEscape(s: string) {
+    return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
+}
+
+function contentUnescape(s: string) {
+    let r = '';
+    for (let i = 0; i < s.length; i++) {
+        if (s[i] === '\\' && i < s.length - 1) {
+            i++;
+            r += s[i] === 'n' ? '\n' : s[i] === '\\' ? '\\' : '\\' + s[i];
+        } else {
+            r += s[i];
+        }
+    }
+    return r;
+}
+
+/** BuildingParameters.content（Marker）：word/tags/name/comment 以换行分隔，各段经 ContentEscape */
+export function parseMarkerContent(content: string): MarkerContent {
+    const parts = content.split(MARKER_CONTENT_SPLITTER);
+    // 与 C# Split(sep, 4) 一致：第 4 段保留其余部分
+    const comment = parts.slice(3).join(MARKER_CONTENT_SPLITTER);
+    return {
+        word: contentUnescape(parts[0] ?? ''),
+        tags: contentUnescape(parts[1] ?? ''),
+        name: contentUnescape(parts[2] ?? ''),
+        comment: contentUnescape(comment),
+    };
+}
+
+export function joinMarkerContent(c: MarkerContent) {
+    return [c.word, c.tags, c.name, c.comment].map(contentEscape).join(MARKER_CONTENT_SPLITTER);
+}
+
+type AllParameters = MarkerParameters | CollectorParameters | AssembleParamerters | StationParameters | AdvancedMiningMachineParameters |
     SplitterParameters | LabParamerters | BeltParameters | InserterParameters |
     TankParameters | StorageParameters | EjectorParameters |
     PowerGeneratorParameters | ArtifacialStarParameters | EnergyExchangerParameters |
@@ -837,6 +972,8 @@ const parameterParsers = new Map<number, ParamParser<AllParameters>>([
     [2030, MonitorParamParser],
     [3009, battleBaseParamParser()],
     [2107, dispenserParamParser],
+    [2105, collectorParamParser()],
+    [2401, markerParamParser],
 ]);
 for (const id of allAssemblers) {
     if (!parameterParsers.has(id))
@@ -1030,7 +1167,14 @@ function exportBuilding(w: BufferWriter, b: BlueprintBuilding) {
 const START = 'BLUEPRINT:';
 const TIME_BASE = new Date(0).setUTCFullYear(1);
 
-export function fromStr(strData: string): BlueprintData {
+export interface FromStrOptions {
+    /** 每读完一批建筑回调一次 (已读, 总数)，最后一次为 (总数, 总数) */
+    onProgress?: (done: number, total: number) => void;
+}
+
+const PROGRESS_STEP = 256;
+
+export function fromStr(strData: string, options: FromStrOptions = {}): BlueprintData {
     if (!strData.startsWith(START))
         throw Error('Invalid start');
 
@@ -1087,8 +1231,13 @@ export function fromStr(strData: string): BlueprintData {
 
     const numBuildings = reader.getInt32();
     const buildings: Array<BlueprintBuilding> = [];
-    for (let i = 0; i < numBuildings; i++)
+    const onProgress = options.onProgress;
+    for (let i = 0; i < numBuildings; i++) {
         buildings.push(importBuilding(reader));
+        if (onProgress && (i + 1) % PROGRESS_STEP === 0 && i + 1 < numBuildings)
+            onProgress(i + 1, numBuildings);
+    }
+    onProgress?.(numBuildings, numBuildings);
 
     const tail = reader.getBytes(reader.remaining());
 

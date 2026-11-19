@@ -1,18 +1,29 @@
 <template>
-    <h2>{{ t(buildingItem.name) }} <small>#{{ building.index }}</small></h2>
+    <div class="detail-head">
+        <BuildingIcon :icon-id="itemIconId(building.itemId)" alt="" />
+        <div>
+            <h3 class="detail-name">{{ t(buildingItem.name) }}</h3>
+            <p>#{{ building.index }} <span>{{ t('位置') }} ({{ position }})</span></p>
+        </div>
+    </div>
     <BuildingRecipe v-if="building.recipeId > 0" :recipeId="building.recipeId" />
 
-    <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
-    <StationInfo v-if="isStation(building.itemId)" :building="building" />
-    <MonitorInfo v-if="isMonitor(building.itemId)" :building="building" />
-    <BattleBaseInfo v-if="isBattleBase(building.itemId)" :building="building" />
-    <StorageInfo v-if="isStorage(building.itemId)" :building="building" />
+    <!-- 参数块为空（parameters === null）时不显示任何依赖参数的内容 -->
+    <template v-if="bParams">
+        <SplitterInfo v-if="isSplitter(building.itemId)" :building="building" />
+        <StationInfo v-if="isStation(building.itemId)" :building="building" />
+        <StationInfo v-if="isOrbitalCollector(building.itemId) && !(bParams as CollectorParameters).allZero" :building="building" />
+        <MarkerInfo v-if="isMarker(building.itemId)" :building="building" />
+        <MonitorInfo v-if="isMonitor(building.itemId)" :building="building" />
+        <BattleBaseInfo v-if="isBattleBase(building.itemId)" :building="building" />
+        <StorageInfo v-if="isStorage(building.itemId)" :building="building" />
+    </template>
     <div class="building-params">
         <div v-if="filterItem">
             <label>{{ t('过滤器') }}</label>
             <span class="v" style="align-self: center;"><BuildingIcon :icon-id="itemIconId(filterItem.id)" :alt="t(filterItem.name)" /></span>
         </div>
-        <div v-if="isLab(building.itemId)">
+        <div v-if="bParams && isLab(building.itemId)">
             <label>{{ t('模式') }}</label>
             <span class="v">{{ LabModeText }}</span>
         </div>
@@ -20,11 +31,11 @@
             <label>{{ t('增产剂效果简') }}</label>
             <span class="v">{{ accModeText }}</span>
         </div>
-        <div v-if="isInserter(building.itemId)">
+        <div v-if="bParams && isInserter(building.itemId)">
             <label>{{ t('分拣长度') }}</label>
             <span class="v">{{ (bParams as InserterParameters).length }}</span>
         </div>
-        <template v-if="isEjector(building.itemId)">
+        <template v-if="bParams && isEjector(building.itemId)">
             <div>
                 <label>{{ t('送入轨道') }}</label>
                 <span class="v">{{ (bParams as EjectorParameters).orbitId === 0 ? t('不选轨道') : (bParams as EjectorParameters).orbitId }}</span>
@@ -34,15 +45,15 @@
                 <span class="v">{{ truth((bParams as EjectorParameters).boost) }}</span>
             </div>
         </template>
-        <div v-if="isEnergyExchanger(building.itemId)">
+        <div v-if="bParams && isEnergyExchanger(building.itemId)">
             <label>{{ t('模式') }}</label>
             <span class="v">{{ energyExchangerMode }}</span>
         </div>
-        <div v-if="isRayReciver(building.itemId)">
+        <div v-if="bParams && isRayReciver(building.itemId)">
             <label>{{ t('模式') }}</label>
             <span class="v">{{ (bParams as PowerGeneratorParameters).productId > 0 ? t('光子生成') : t('直接发电') }}</span>
         </div>
-        <div v-if="isArtificialStar(building.itemId)">
+        <div v-if="bParams && isArtificialStar(building.itemId)">
             <label>{{ t('百倍发电') }}</label>
             <span class="v">{{ truth((bParams as ArtifacialStarParameters).boost) }}</span>
         </div>
@@ -50,11 +61,11 @@
     <div v-if="beltParams">
         <BuildingIcon :icon-id="beltParams.iconId" />{{ beltParams.count }}
     </div>
-    <div class="tank-io" v-if="isTank(building.itemId)">
+    <div class="tank-io" v-if="bParams && isTank(building.itemId)">
         <SwitchDSP :opened="(bParams as TankParameters).output">{{ t('储液罐输出') }}</SwitchDSP>
         <SwitchDSP :opened="(bParams as TankParameters).input">{{ t('储液罐输入') }}</SwitchDSP>
     </div>
-    <DispenserInfo v-if="isDispenser(building.itemId)" :building="building" />
+    <DispenserInfo v-if="bParams && isDispenser(building.itemId)" :building="building" />
 </template>
 
 <script lang="ts">
@@ -86,13 +97,13 @@ import { truth } from '@/utils';
 import {
     LabParamerters, AssembleParamerters, TankParameters, BlueprintBuilding,
     BeltParameters, InserterParameters, EjectorParameters,
-    EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters,
+    EnergyExchangerParameters, PowerGeneratorParameters, ArtifacialStarParameters, CollectorParameters,
 } from '@/blueprint/parser';
 import { itemIconId } from '@/data/icons';
 import {
     isLab, allAssemblers, isBelt, isStation, itemsMap, isInserter, isStorage, isTank,
     isEjector, isEnergyExchanger, isArtificialStar, isRayReciver, isMonitor, isSplitter,
-    isBattleBase, isDispenser,
+    isBattleBase, isDispenser, isOrbitalCollector, isMarker,
 } from '@/data/items';
 import { recipesMap } from '@/data';
 import { commandQueueKey } from '@/define';
@@ -100,6 +111,7 @@ import { commandQueueKey } from '@/define';
 import BuildingRecipe from './BuildingRecipe.vue';
 import BuildingIcon from './BuildingIcon.vue';
 import StationInfo from './StationInfo.vue';
+import MarkerInfo from './MarkerInfo.vue';
 import MonitorInfo from './MonitorInfo.vue';
 import BattleBaseInfo from './BattleBaseInfo.vue';
 import StorageInfo from './StorageInfo.vue';
@@ -154,8 +166,9 @@ const accModeText = computed(() => {
     if (p === undefined)
         return undefined;
     let mode = AcceleratorMode.Accelerate;
-    if (p)
-        mode = (props.building!.parameters as AssembleParamerters).acceleratorMode;
+    const params = props.building.parameters as AssembleParamerters | null;
+    if (p && params)
+        mode = params.acceleratorMode;
     return t(accModeTexts.get(mode)!);
 })
 
@@ -172,6 +185,11 @@ commandQueue.updater.updateBeltIcon.onMounted(b => {
 });
 
 const bParams = computed(() => props.building.parameters);
+const fmt = (v: number) => String(Math.round(v * 100) / 100);
+const position = computed(() => {
+    const p = props.building.localOffset[0];
+    return `${fmt(p.x)}, ${fmt(p.y)}`;
+});
 const energyExchangerMode = computed(() => {
     const mode = (props.building.parameters as EnergyExchangerParameters).mode;
     return t(energyExchangerModeTexts.get(mode)!);
@@ -179,6 +197,21 @@ const energyExchangerMode = computed(() => {
 </script>
 
 <style lang="scss">
+.detail-head {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+    .icon { width: 48px; flex: none; }
+    .detail-name { margin: 0; font: 600 16px/1.3 var(--cjk); color: var(--text); }
+    p {
+        margin: 2px 0 0;
+        font: 12px var(--num);
+        color: var(--muted);
+        span { margin-left: 8px; }
+    }
+}
+
 .building-params {
     margin-bottom: 20px;
     h3 {
@@ -198,7 +231,7 @@ const energyExchangerMode = computed(() => {
     }
     label {
         display: inline-block;
-        font-weight: bold;
+        color: var(--muted);
     }
     .v {
         display: inline-block;
@@ -222,11 +255,13 @@ const energyExchangerMode = computed(() => {
 {
     "zh": {
         "模式": "模式",
-        "送入轨道": "送入轨道"
+        "送入轨道": "送入轨道",
+        "位置": "位置"
     },
     "en": {
         "模式": "Mode",
-        "送入轨道": "Orbit"
+        "送入轨道": "Orbit",
+        "位置": "Position"
     },
     "fr": {
         "模式": "Mode",

@@ -51,7 +51,7 @@ const constructionPriority = computed(() => {
         case BattleBaseDroneConstructPriority.REPARE:
             return t('建设机优先修理标题');
         case BattleBaseDroneConstructPriority.BALANCE:
-            return t('建设机均衡模式标题');
+            return t('建设机均衡建造标题');
         case BattleBaseDroneConstructPriority.CONSTRUCT:
             return t('建设机优先建造标题');
         default:
