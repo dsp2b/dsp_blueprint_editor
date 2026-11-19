@@ -367,13 +367,13 @@ body {
         "复制粘贴不支持": "不支持，请手动复制",
         "确认替换": "当前蓝图有未保存的修改，打开新蓝图会丢弃这些修改。继续吗？",
         "三维预览": "蓝图三维预览",
-        "三维预览说明": "蓝图的三维预览：拖动旋转，滚轮或双指缩放，点击建筑在侧栏查看详情。"
+        "三维预览说明": "蓝图的三维预览：拖动平移，右键拖动旋转与调整俯仰，滚轮或双指缩放，点击建筑在侧栏查看详情，按 ? 查看全部操作。"
     },
     en: {
         "复制粘贴不支持": "Not supported, please copy manually",
         "确认替换": "The current blueprint has unsaved edits. Opening another one discards them. Continue?",
         "三维预览": "Blueprint 3D preview",
-        "三维预览说明": "3D preview of the blueprint: drag to rotate, scroll or pinch to zoom, click a building to see its details in the sidebar."
+        "三维预览说明": "3D preview of the blueprint: drag to pan, right-drag to rotate and tilt, scroll or pinch to zoom, click a building to see its details in the sidebar. Press ? for all controls."
     },
 }
 </i18n>

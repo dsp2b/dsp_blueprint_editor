@@ -31,11 +31,31 @@
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h14M13 7l5 5-5 5"/></svg>
 					<span class="label">{{ t('流向') }}</span>
 				</button>
+				<button type="button" class="tool help-toggle" :aria-pressed="helpOpen" aria-keyshortcuts="?"
+					:title="`${t('操作说明')} (?)`" :aria-label="t('操作说明')" aria-controls="view-help" @click="helpOpen = !helpOpen">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg>
+				</button>
+			</div>
+
+			<div v-if="helpOpen" id="view-help" class="view-help" role="note">
+				<button type="button" class="close" :aria-label="t('关闭')" @click="helpOpen = false">×</button>
+				<dl>
+					<template v-for="row of helpRows" :key="row[0]">
+						<dt>{{ row[0] }}</dt><dd>{{ row[1] }}</dd>
+					</template>
+				</dl>
 			</div>
 
 			<button type="button" class="tool tool-shot" :title="t('截图说明')" @click="screenshot()">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
 				<span class="label">{{ t('截图') }}</span>
+			</button>
+
+			<button type="button" class="tool tool-compass" :title="`${t('朝北')} (N)`" aria-keyshortcuts="N"
+				:aria-label="t('朝北')" @click="faceNorth()">
+				<svg viewBox="0 0 24 24" aria-hidden="true" :style="{ transform: `rotate(${heading}rad)` }">
+					<path d="M12 3l4 9h-8z" fill="#E5534B"/><path d="M12 21l-4-9h8z" fill="currentColor" opacity=".55"/>
+				</svg>
 			</button>
 
 			<div class="legend" role="list" :aria-label="t('等级图例')">
@@ -91,7 +111,6 @@ import {
 	Scene, PerspectiveCamera, SphereGeometry, Mesh, MeshStandardMaterial, WebGLRenderer, DirectionalLight,
 	HemisphereLight, Matrix4, Object3D, Vector3,
 } from 'three';
-import { PlanetMapControls } from '@/PlanetMapControls';
 import { attachCamera, attachRenderer } from '@/utils';
 import { findPosForAreas, calcBuildingTrans } from '@/blueprint/planet';
 import { commandQueueKey } from '@/define';
@@ -103,6 +122,7 @@ import { buildBadges, registerIconUpdater } from '@/render/core/badges';
 import { buildBVH, pickBuilding } from '@/render/core/pick';
 import { blueprintBoundsPoints, frameBounds } from '@/render/core/framing';
 import { CameraRig } from '@/render/core/cameraRig';
+import { MapControls } from '@/render/core/mapControls';
 import { SelectionMarker } from '@/render/core/selection';
 import { HighlightFilter, highlightMask } from '@/render/core/filter';
 import { TIER_HEX } from '@/render/core/tiers';
@@ -314,20 +334,51 @@ const deselect = () => {
 
 // ───────── 相机 ─────────
 let rig: CameraRig | null = null;
-let controls: PlanetMapControls | null = null;
+let controls: MapControls | null = null;
+/** 画面朝向（弧度，0 为朝北），给指南针用 */
+const heading = ref(0);
+watchEffect(() => {
+	if (controls)
+		controls.reducedMotion = reducedMotion.value;
+});
 
 const fit = (tilt: number) => {
 	const built = b.value;
-	if (!built || !rig || !controls || built.bounds.length === 0)
+	if (!built || !rig || built.bounds.length === 0)
 		return false;
 	const f = frameBounds(built.bounds, {
 		R, fov: camera.fov, aspect: camera.aspect, tilt,
-		minDistance: controls.minDistance - R, maxDistance: controls.maxDistance - R,
+		minDistance: rig.minDistance, maxDistance: rig.maxDistance,
 		flattenBeyond: FLATTEN_BEYOND,
 	});
-	rig.flyTo(f.base, f.tilt, reducedMotion.value);
+	rig.flyTo({ normal: f.normal, distance: f.distance, tilt: f.tilt }, reducedMotion.value);
 	return true;
 };
+/** 原地转回正北（N） */
+const faceNorth = () => {
+	if (rig)
+		rig.flyTo({ normal: rig.normal, distance: rig.distance, tilt: rig.tilt, heading: 0 }, reducedMotion.value);
+};
+const helpOpen = ref(false);
+const isTouch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+const helpRows = computed(() => isTouch ? [
+	[t('单指拖动'), t('平移')],
+	[t('双指捏合'), t('缩放')],
+	[t('双指旋转'), t('转动朝向')],
+	[t('双指上下滑'), t('调整俯仰')],
+	[t('点按建筑'), t('查看详情')],
+] : [
+	[t('左键拖动'), t('平移')],
+	[t('右键/中键拖动'), t('左右转动朝向，上下调整俯仰')],
+	['Shift + ' + t('左键拖动'), t('同右键拖动')],
+	[t('滚轮'), t('朝光标缩放')],
+	[t('双击'), t('放大（Shift 缩小）')],
+	['WASD / ↑↓←→', t('平移')],
+	['Q / E', t('转动朝向')],
+	['+ / −', t('缩放')],
+	['F / T / N', t('对准蓝图 / 俯视 / 朝北')],
+	['Esc', t('取消选中')],
+]);
 /** 让相机框住整个蓝图（F）；减少动态效果时直接跳过去 */
 const frameBlueprint = () => fit(FRAME_TILT);
 /** 正俯视整个蓝图（T） */
@@ -403,19 +454,12 @@ onMounted(() => {
 	const rootEl = root.value!;
 	const canvas = renderer.domElement;
 
-	controls = new PlanetMapControls(camera, canvas);
-	controls.listenToKeyEvents(rootEl);
-	controls.minDistance = R * 1.04;
-	controls.maxDistance = R * 4;
-	controls.targetRadius = R;
-	controls.update();
-	rig = new CameraRig(camera, controls, R);
-	const onControlStart = () => rig?.stop();
-	controls.addEventListener('start', onControlStart);
-	onUnmounted(() => {
-		controls?.removeEventListener('start', onControlStart);
-		controls?.dispose();
-	});
+	rig = new CameraRig(camera, R);
+	rig.minDistance = R * 0.04;
+	rig.maxDistance = R * 3;
+	controls = new MapControls(rig, canvas, rootEl);
+	controls.reducedMotion = reducedMotion.value;
+	onUnmounted(() => controls?.dispose());
 	// 渲染器是异步组件：可能在蓝图打开之后才挂载
 	if (b.value)
 		frameBlueprint();
@@ -427,11 +471,22 @@ onMounted(() => {
 		return pickBuilding(b.value.bvh, camera, R, (e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
 	};
 
+	let pendingMove: PointerEvent | null = null;
+	// 只有单个指针、没怎么移动的左键/单指才算点击（双指手势、修饰键+拖动不算）
 	let downAt: [number, number] | null = null;
+	const down = new Set<number>();
 	const onPointerDown = (e: PointerEvent) => {
-		downAt = e.button === 0 ? [e.clientX, e.clientY] : null;
+		down.add(e.pointerId);
+		const modified = e.shiftKey || e.ctrlKey || e.metaKey || e.altKey;
+		downAt = e.button === 0 && down.size === 1 && !modified ? [e.clientX, e.clientY] : null;
+	};
+	const onPointerCancel = (e: PointerEvent) => {
+		down.delete(e.pointerId);
+		downAt = null;
 	};
 	const onPointerUp = (e: PointerEvent) => {
+		down.delete(e.pointerId);
+		pendingMove = e;  // 松手后刷新光标与悬停
 		if (e.button !== 0 || downAt === null || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > CLICK_SLOP)
 			return;
 		downAt = null;
@@ -440,7 +495,7 @@ onMounted(() => {
 		emit('update:selectedBuildingIndex', picked);
 	};
 
-	let pendingMove: PointerEvent | null = null;
+	canvas.style.cursor = 'grab';
 	const onPointerMove = (e: PointerEvent) => {
 		pendingMove = e;
 	};
@@ -450,9 +505,10 @@ onMounted(() => {
 			return;
 		pendingMove = null;
 		// 拖动、触摸时不显示悬停
-		const picked = e.buttons === 0 && e.pointerType !== 'touch' ? pickAt(e) : null;
+		const dragging = e.buttons !== 0 || !!controls?.dragging;
+		const picked = !dragging && e.pointerType !== 'touch' ? pickAt(e) : null;
 		hovered.value = picked;
-		canvas.style.cursor = picked === null ? '' : 'pointer';
+		canvas.style.cursor = controls?.dragging ? 'grabbing' : picked === null ? 'grab' : 'pointer';
 		if (picked === null) {
 			tip.visible = false;
 			return;
@@ -470,11 +526,13 @@ onMounted(() => {
 	};
 	canvas.addEventListener('pointerdown', onPointerDown);
 	canvas.addEventListener('pointerup', onPointerUp);
+	canvas.addEventListener('pointercancel', onPointerCancel);
 	canvas.addEventListener('pointermove', onPointerMove);
 	canvas.addEventListener('pointerleave', onPointerLeave);
 	onUnmounted(() => {
 		canvas.removeEventListener('pointerdown', onPointerDown);
 		canvas.removeEventListener('pointerup', onPointerUp);
+		canvas.removeEventListener('pointercancel', onPointerCancel);
 		canvas.removeEventListener('pointermove', onPointerMove);
 		canvas.removeEventListener('pointerleave', onPointerLeave);
 	});
@@ -491,6 +549,10 @@ onMounted(() => {
 			frameBlueprint();
 		} else if (e.key === 't' || e.key === 'T') {
 			topView();
+		} else if (e.key === 'n' || e.key === 'N') {
+			faceNorth();
+		} else if (e.key === '?') {
+			helpOpen.value = !helpOpen.value;
 		}
 	};
 	window.addEventListener('keydown', onKeyDown);
@@ -505,7 +567,7 @@ onMounted(() => {
 		requestAnimationFrame(animate);
 		const dt = lastTimeStamp === null ? 0 : Math.min((time - lastTimeStamp) / 1000, 0.1);
 		lastTimeStamp = time;
-		controls!.updateTimeDelta(dt);
+		controls!.update(dt);
 
 		const built = b.value;
 		if (built) {
@@ -533,8 +595,10 @@ onMounted(() => {
 		sun.position.copy(pose.target)
 			.addScaledVector(pose.normal, 100).addScaledVector(pose.east, 45).addScaledVector(pose.north, -60);
 		renderer.render(scene, camera);
-		if (changed)
+		if (changed) {
 			cameraPosVersion.value++;
+			heading.value = rig!.heading;
+		}
 	}
 	requestAnimationFrame(animate);
 });
@@ -586,7 +650,7 @@ defineExpose({
 	z-index: 3;
 }
 
-.view-tools .tool, .tool-shot {
+.view-tools .tool, .tool-shot, .tool-compass {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -616,6 +680,67 @@ defineExpose({
 		width: 16px;
 		height: 16px;
 		flex: none;
+	}
+}
+
+.view-tools .help-toggle {
+	padding: 0 9px;
+}
+.tool-compass {
+	position: absolute;
+	right: 16px;
+	top: 58px;
+	z-index: 3;
+	width: 34px;
+	justify-content: center;
+	padding: 0;
+
+	svg {
+		width: 20px;
+		height: 20px;
+		transition: transform .12s linear;
+	}
+}
+
+.view-help {
+	position: absolute;
+	left: 16px;
+	bottom: 60px;
+	z-index: 4;
+	max-width: min(360px, calc(100% - 32px));
+	padding: 12px 34px 12px 14px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: rgba(12, 22, 36, .94);
+	backdrop-filter: blur(6px);
+	font-size: 12px;
+	color: var(--text);
+
+	dl {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 6px 14px;
+		margin: 0;
+	}
+	dt {
+		color: var(--holo);
+		white-space: nowrap;
+	}
+	dd {
+		margin: 0;
+		color: var(--muted);
+	}
+	.close {
+		position: absolute;
+		right: 6px;
+		top: 4px;
+		border: 0;
+		background: transparent;
+		color: var(--muted);
+		font-size: 18px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 4px;
 	}
 }
 
@@ -697,13 +822,27 @@ defineExpose({
 @media (max-width: 760px) {
 	.view-tools {
 		left: 10px;
+		right: 10px;
+		flex-wrap: wrap;
+		gap: 4px;
 		bottom: calc(var(--sheet-peek) + 10px);
+		.mode-seg button {
+			padding: 0 9px;
+		}
 		.label {
 			display: none;
 		}
 		.tool {
 			padding: 0 9px;
 		}
+	}
+	.view-help {
+		left: 10px;
+		bottom: calc(var(--sheet-peek) + 54px);
+	}
+	.tool-compass {
+		right: 10px;
+		top: 52px;
 	}
 	.tool-shot {
 		right: 10px;
@@ -742,9 +881,32 @@ defineExpose({
         "截图说明": "把当前视图保存为图片",
         "等级图例": "颜色图例：传送带、分拣器和建筑饰条的等级",
         "画布空": "蓝图三维预览：尚未打开蓝图",
-        "画布描述": "蓝图「{name}」的三维预览，共 {count} 个建筑。拖动旋转，滚轮缩放，点击建筑查看详情，F 对准蓝图，T 俯视，Esc 取消选中。",
+        "画布描述": "蓝图「{name}」的三维预览，共 {count} 个建筑。左键拖动平移，右键拖动旋转与调整俯仰，滚轮缩放，点击建筑查看详情，F 对准蓝图，T 俯视，N 朝北，Esc 取消选中。",
         "画布选中": "已选中：{name}。",
-        "未命名": "未命名"
+        "未命名": "未命名",
+        "朝北": "朝北",
+        "操作说明": "操作说明",
+        "关闭": "关闭",
+        "单指拖动": "单指拖动",
+        "双指捏合": "双指捏合",
+        "双指旋转": "双指旋转",
+        "双指上下滑": "双指上下滑",
+        "点按建筑": "点按建筑",
+        "左键拖动": "左键拖动",
+        "右键/中键拖动": "右键/中键拖动",
+        "滚轮": "滚轮",
+        "双击": "双击",
+        "平移": "平移",
+        "缩放": "缩放",
+        "转动朝向": "转动朝向",
+        "调整俯仰": "调整俯仰",
+        "查看详情": "查看详情",
+        "左右转动朝向，上下调整俯仰": "左右转动朝向，上下调整俯仰",
+        "同右键拖动": "同右键拖动",
+        "朝光标缩放": "朝光标位置缩放",
+        "放大（Shift 缩小）": "放大（Shift 缩小）",
+        "对准蓝图 / 俯视 / 朝北": "对准蓝图 / 俯视 / 朝北",
+        "取消选中": "取消选中"
     },
     "en": {
         "视图工具": "View tools",
@@ -764,9 +926,32 @@ defineExpose({
         "截图说明": "Save the current view as an image",
         "等级图例": "Colour legend: tier of belts, sorters and building trims",
         "画布空": "Blueprint 3D preview: no blueprint open",
-        "画布描述": "3D preview of blueprint \"{name}\" with {count} buildings. Drag to rotate, scroll to zoom, click a building for details, F to frame, T for top view, Esc to deselect.",
+        "画布描述": "3D preview of blueprint \"{name}\" with {count} buildings. Left-drag to pan, right-drag to rotate and tilt, scroll to zoom, click a building for details, F to frame, T for top view, N to face north, Esc to deselect.",
         "画布选中": "Selected: {name}.",
-        "未命名": "Untitled"
+        "未命名": "Untitled",
+        "朝北": "Face north",
+        "操作说明": "Controls",
+        "关闭": "Close",
+        "单指拖动": "One-finger drag",
+        "双指捏合": "Pinch",
+        "双指旋转": "Two-finger twist",
+        "双指上下滑": "Two-finger swipe up/down",
+        "点按建筑": "Tap a building",
+        "左键拖动": "Left-drag",
+        "右键/中键拖动": "Right/middle-drag",
+        "滚轮": "Scroll wheel",
+        "双击": "Double-click",
+        "平移": "Pan",
+        "缩放": "Zoom",
+        "转动朝向": "Rotate",
+        "调整俯仰": "Tilt",
+        "查看详情": "Show details",
+        "左右转动朝向，上下调整俯仰": "Left/right to rotate, up/down to tilt",
+        "同右键拖动": "Same as right-drag",
+        "朝光标缩放": "Zoom towards the cursor",
+        "放大（Shift 缩小）": "Zoom in (Shift: zoom out)",
+        "对准蓝图 / 俯视 / 朝北": "Frame blueprint / top view / face north",
+        "取消选中": "Deselect"
     }
 }
 </i18n>

@@ -60,18 +60,44 @@ export function tangentFrame(n: Vector3, east = new Vector3(), north = new Vecto
     return { east, north };
 }
 
-/** 由控制器给出的 base 位置（看向球心）求出带俯仰角的相机姿态 */
+/**
+ * 由注视点法线、画面朝向（切平面内的单位向量，画面上方）、距离与俯仰角求相机姿态。
+ * 返回的 north/east 是画面的"前方/右方"（朝北时就是地理上的北/东）。
+ */
+export function poseFromView(normal: Vector3, forward: Vector3, R: number, distance: number, tilt: number): CameraPose {
+    const n = normal.clone().normalize();
+    const north = forward.clone().addScaledVector(n, -forward.dot(n));
+    if (north.lengthSq() < 1e-10)
+        tangentFrame(n, undefined, north);
+    north.normalize();
+    const east = new Vector3().crossVectors(north, n);
+    const target = n.clone().multiplyScalar(R);
+    distance = Math.max(distance, 0);
+    const c = Math.cos(tilt), s = Math.sin(tilt);
+    // 相机在注视点的后方上方，看向前方
+    const dir = n.clone().multiplyScalar(c).addScaledVector(north, -s);
+    const up = n.clone().multiplyScalar(s).addScaledVector(north, c);
+    const position = target.clone().addScaledVector(dir, distance);
+    return { target, normal: n, north, east, position, up, distance, tilt };
+}
+
+/** 由 base 位置（注视点正上方，画面朝北）求出带俯仰角的相机姿态 */
 export function poseFromBase(base: Vector3, R: number, tilt: number): CameraPose {
     const normal = base.clone().normalize();
-    const { east, north } = tangentFrame(normal);
-    const target = normal.clone().multiplyScalar(R);
-    const distance = Math.max(base.length() - R, 0);
-    const c = Math.cos(tilt), s = Math.sin(tilt);
-    // 相机在注视点的南侧上方，看向北
-    const dir = normal.clone().multiplyScalar(c).addScaledVector(north, -s);
-    const up = normal.clone().multiplyScalar(s).addScaledVector(north, c);
-    const position = target.clone().addScaledVector(dir, distance);
-    return { target, normal, north, east, position, up, distance, tilt };
+    const { north } = tangentFrame(normal);
+    return poseFromView(normal, north, R, base.length() - R, tilt);
+}
+
+/** forward 相对地理北方的朝向角：0 为朝北，正值为从外面看逆时针（转向西） */
+export function headingOf(normal: Vector3, forward: Vector3) {
+    const { east, north } = tangentFrame(normal.clone().normalize());
+    return Math.atan2(-forward.dot(east), forward.dot(north));
+}
+
+/** 朝向角 heading 对应的 forward 向量（headingOf 的逆） */
+export function forwardFromHeading(normal: Vector3, heading: number, out = new Vector3()) {
+    const { east, north } = tangentFrame(normal.clone().normalize());
+    return out.copy(north).multiplyScalar(Math.cos(heading)).addScaledVector(east, -Math.sin(heading));
 }
 
 /** 选中框角点（分拣器取两端），用来求蓝图在球面上的包围范围 */
