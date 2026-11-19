@@ -56,11 +56,10 @@ export function mapParseError(e: unknown, code: string, supported: string): Pars
 
     const truncated = msg === 'Header too short'
         || e instanceof RangeError
-        // pako 对截断的 gzip 返回 undefined，随后 .buffer 抛 TypeError
         || e instanceof TypeError
         || msg.startsWith('参数解析错误')
-        // pako 抛出的是字符串形式的 zlib 错误；atob 对坏 base64 抛 InvalidCharacterError
+        // 解压失败由 parser 包装为 GzipError；字符串形式的 zlib 错误兼容旧 pako；atob 对坏 base64 抛 InvalidCharacterError
         || (typeof e === 'string')
-        || (e as { name?: string } | null)?.name === 'InvalidCharacterError';
+        || ['GzipError', 'InvalidCharacterError'].includes((e as { name?: string } | null)?.name ?? '');
     return { kind: truncated ? 'truncated' : 'unknown', params: none };
 }

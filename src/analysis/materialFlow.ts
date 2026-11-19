@@ -90,8 +90,10 @@ export function analyzeMaterialFlow(buildings: FlowBuilding[], env: FlowEnv): Ma
         if (!recipe || recipe.time <= 0)
             continue;
         const rates = recipeRates(recipe, worker.speed);
-        for (const l of rates.inputs)
-            add(demand, l.itemId, l.perMin), addBy(demandBy, l.itemId, recipe.id, l.perMin);
+        for (const l of rates.inputs) {
+            add(demand, l.itemId, l.perMin);
+            addBy(demandBy, l.itemId, recipe.id, l.perMin);
+        }
         for (const l of rates.outputs) {
             add(supply, l.itemId, l.perMin);
             addBy(supplyBy, l.itemId, recipe.id, l.perMin);

@@ -78,7 +78,7 @@ export class CommandQueue {
     }
 
     public canUndo() {
-        this.stateVersion.value;
+        void this.stateVersion.value;
         return this.currentPosition > 0;
     }
 
@@ -92,7 +92,7 @@ export class CommandQueue {
     }
 
     public canRedo() {
-        this.stateVersion.value;
+        void this.stateVersion.value;
         return this.currentPosition < this.commands.length;
     }
 

@@ -8,7 +8,7 @@ jest.mock('@/data/icons', () => ({
     },
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const BuildingIcon = require('@/components/BuildingIcon.vue').default;
 
 describe('BuildingIcon', () => {

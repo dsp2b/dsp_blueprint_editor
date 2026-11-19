@@ -1,5 +1,5 @@
 import { allAssemblers } from '@/data/items';
-import pako from 'pako';
+import { gzip, ungzip } from 'pako';
 import { digest } from './md5';
 
 export interface BlueprintArea {
@@ -1174,6 +1174,17 @@ export interface FromStrOptions {
 
 const PROGRESS_STEP = 256;
 
+/** pako 解压失败（截断/损坏）统一抛 name 为 GzipError 的错误，供上层识别为"代码不完整" */
+function gunzip(data: Uint8Array): Uint8Array {
+    try {
+        return ungzip(data);
+    } catch (e) {
+        const err = new Error(`Gzip decode failed: ${e instanceof Error ? e.message : String(e)}`);
+        err.name = 'GzipError';
+        throw err;
+    }
+}
+
 export function fromStr(strData: string, options: FromStrOptions = {}): BlueprintData {
     if (!strData.startsWith(START))
         throw Error('Invalid start');
@@ -1207,7 +1218,7 @@ export function fromStr(strData: string, options: FromStrOptions = {}): Blueprin
         throw Error('Checksum mismatch')
 
     const encoded = strData.substring(p1 + 1, p2);
-    const decoded = pako.ungzip(btoUint8Array(atob(encoded)));
+    const decoded = gunzip(btoUint8Array(atob(encoded)));
     const reader = new BufferReader(new DataView(decoded.buffer));
 
     const meta = {
@@ -1309,7 +1320,7 @@ export function toStr(bp: BlueprintData): string {
         exportBuilding(writer, b);
     writer.setBytes(tail);
 
-    result += btoa(Uint8ArrayTob(pako.gzip(decoded)));
+    result += btoa(Uint8ArrayTob(gzip(decoded)));
     const d = hex(digest(btoUint8Array(result).buffer));
 
     result += '"'

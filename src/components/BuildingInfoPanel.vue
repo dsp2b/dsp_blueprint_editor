@@ -132,7 +132,7 @@ const buildingItem = computed(() => {
 })
 const filterVersion = ref(0);
 const filterItem = computed(() => {
-    filterVersion.value;
+    void filterVersion.value;
     if (props.building.filterId <= 0)
         return null;
     return itemsMap.get(props.building.filterId)!;
@@ -174,7 +174,7 @@ const accModeText = computed(() => {
 
 const beltVersion = ref(0);
 const beltParams = computed(() => {
-    beltVersion.value;
+    void beltVersion.value;
     if (isBelt(props.building.itemId) && props.building.parameters)
         return props.building.parameters as BeltParameters;
     return null;

@@ -1,4 +1,4 @@
-import { Matrix4, Texture, TextureLoader, Vector2, Vector3, WebGLRenderer } from 'three';
+import { InstancedBufferAttribute, Matrix4, Texture, TextureLoader, Vector2, Vector3, WebGLRenderer } from 'three';
 import type { BeltParameters, BlueprintBuilding } from '@/blueprint/parser';
 import { IconGeometry } from '@/icons';
 import { IconSubscript } from '@/iconSubscript';
@@ -42,7 +42,7 @@ function building(index: number, extra: Partial<BlueprintBuilding>): BlueprintBu
 describe('IconTexture', () => {
     test('does not copy into the atlas once it has been disposed (switching blueprints mid-load)', async () => {
         const { IconTexture } = await import('@/iconTexture');
-        let finish: (t: Texture) => void = () => undefined;
+        let finish: (t: Texture<HTMLImageElement>) => void = () => undefined;
         jest.spyOn(TextureLoader.prototype, 'loadAsync').mockImplementation(() => new Promise(r => { finish = r; }));
         const renderer = fakeRenderer();
         const atlas = new IconTexture(renderer);
@@ -102,5 +102,22 @@ describe('IconGeometry', () => {
         icons.addIcon(b, 2, new Vector3(), new Vector2(1, 1), true);
         const dim = icons.getAttribute('iconDim').array;
         expect(Array.from(dim.slice(0, 2))).toEqual([0, 1]);
+    });
+    test('icon id changes between uploads merge into one GPU update range', () => {
+        const bs = [0, 1, 2, 3].map(i => building(i, {}));
+        const icons = new IconGeometry(4);
+        for (const b of bs) icons.addIcon(b, 1, new Vector3(), new Vector2(1, 1));
+        const attr = icons.getAttribute('iconId') as InstancedBufferAttribute;
+        const v0 = attr.version;
+
+        icons.updateIconId(bs[3], 7);
+        icons.updateIconId(bs[1], 7);
+        expect(attr.updateRanges).toEqual([{ start: 1, count: 3 }]);
+        expect(attr.version).toBeGreaterThan(v0);
+        expect(Array.from(attr.array)).toEqual([1, 7, 1, 7]);
+
+        attr.clearUpdateRanges(); // 渲染器上传后会清空
+        icons.updateIconId(bs[0], 9);
+        expect(attr.updateRanges).toEqual([{ start: 0, count: 1 }]);
     });
 });

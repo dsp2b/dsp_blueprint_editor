@@ -8,7 +8,7 @@ jest.mock('@/data/icons', () => ({
     iconUrl: () => Promise.resolve('/icon.png'),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const BuildingInfoPanel = require('@/components/BuildingInfoPanel.vue').default;
 
 const hook = { onMounted: () => undefined };
