@@ -1,5 +1,7 @@
 /** 把解析器抛出的内部异常归类为面向用户的错误种类；文案在 SFC 的 <i18n> 中按 kind 取。 */
-export type ParseErrorKind = 'notBlueprint' | 'checksum' | 'truncated' | 'newer' | 'unknown';
+export type ParseErrorKind = 'notBlueprint' | 'checksum' | 'truncated' | 'newer' | 'unknown'
+    // 从 dsp2b 取蓝图失败（非解析异常，由 App 直接设置）
+    | 'dsp2bNotFound' | 'dsp2bUnreachable';
 
 export interface ParseErrorInfo {
     kind: ParseErrorKind;

@@ -6,7 +6,7 @@
                 v-model:selectedBuildingIndex="selectedBuildingIndex" />
             <OpenCard v-if="!data"
                 v-model:input="session.input.value"
-                :error="session.error.value" :loading="session.loading.value"
+                :error="session.error.value ?? sourceError" :loading="cardLoading"
                 :recent="session.recent.value" :supported="supportedGameVersion" :dragging="dragging"
                 @open="openCode" @clear-recent="session.clearRecent()" />
             <div v-if="!data" class="float-settings">
@@ -15,7 +15,7 @@
         </main>
         <SidebarPanel v-if="data" :key="openCount"
             :data="data" :selected-building="selectedBuilding"
-            :code="bpStrInput" :get-code="bpStrLatest" :copy="copy" :disabled="working"
+            :code="bpStrInput" :get-code="bpStrLatest" :copy="copy" :disabled="working" :dsp2b-id="dsp2bId"
             @save="saveFile" @switch="switchBp">
             <!-- 已打开蓝图时拖入的新文件解析失败 -->
             <template v-if="session.error.value" #notice>
@@ -32,6 +32,8 @@ import { fromStr, toStr } from '@/blueprint/parser';
 import { supportedGameVersion } from '@/data/types';
 import { useBlueprintSession } from '@/open/session';
 import { createWorkerParser, WorkerLike } from '@/open/workerParser';
+import { fetchDsp2bBlueprint, isPlausibleId } from '@/open/dsp2bSource';
+import type { ParseErrorInfo } from '@/open/errorMap';
 import { createRecentStore } from '@/open/recentStore';
 import { sessionKey } from '@/open/keys';
 import { pastedText } from '@/open/paste';
@@ -83,6 +85,37 @@ const data = session.data;
 const dragging = ref(false);
 const busy = ref(false);
 const working = computed(() => busy.value || session.loading.value.active);
+
+// 通过 ?id= 从 dsp2b 打开：取回期间沿用卡片的加载态（禁用输入）；失败在卡片上提示，仍可粘贴
+const dsp2bId = ref<string | null>(null);
+const fetching = ref(false);
+const sourceError = ref<ParseErrorInfo | null>(null);
+const cardLoading = computed(() => fetching.value && !session.loading.value.active
+    ? { active: true, visible: false, done: 0, total: 0 }
+    : session.loading.value);
+/** 不再是 dsp2b 的蓝图（换蓝图或之后打开了别的）：去掉回链，并从地址栏移除 id，避免刷新又打开旧蓝图 */
+const forgetDsp2b = () => {
+    dsp2bId.value = null;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('id')) {
+        url.searchParams.delete('id');
+        history.replaceState(history.state, '', url.toString());
+    }
+};
+onMounted(async () => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (!isPlausibleId(id))
+        return;
+    fetching.value = true;
+    const r = await fetchDsp2bBlueprint(id, (u, init) => fetch(u, init));
+    fetching.value = false;
+    if (r.kind !== 'ok') {
+        sourceError.value = { kind: r.kind === 'not_found' ? 'dsp2bNotFound' : 'dsp2bUnreachable', params: {} };
+        return;
+    }
+    if (await session.open(r.code))
+        dsp2bId.value = id;
+});
 const codeExpired = ref(false);
 const selectedBuildingIndex = ref(null as number | null);
 /** 每打开一个蓝图加一，侧栏据此重建（子组件在 setup 时取 commandQueue） */
@@ -153,12 +186,21 @@ session.onOpened(parsed => {
     })
 });
 
-const openCode = (s: string) => session.open(s);
+/** 用户自己打开的蓝图（粘贴、文件、最近）：成功后不再属于 dsp2b */
+const openOwn = async (s: string) => {
+    sourceError.value = null;
+    const ok = await session.open(s);
+    if (ok)
+        forgetDsp2b();
+    return ok;
+};
+const openCode = openOwn;
 
 const clearBp = () => {
     stopDataWatch?.();
     stopDataWatch = null;
     session.close();
+    forgetDsp2b();
     selectedBuildingIndex.value = null;
     bpStr.value = '';
     codeExpired.value = false;
@@ -206,7 +248,7 @@ const saveFile = () => {
 const openFile = async (f: File) => {
     busy.value = true;
     try {
-        await session.open(await f.text());
+        await openOwn(await f.text());
     } finally {
         busy.value = false;
     }
@@ -271,7 +313,7 @@ const onPagePaste = (e: ClipboardEvent) => {
     if (text === null)
         return;
     e.preventDefault();
-    session.open(text);
+    openOwn(text);
 }
 onMounted(() => document.addEventListener('paste', onPagePaste));
 onUnmounted(() => document.removeEventListener('paste', onPagePaste));

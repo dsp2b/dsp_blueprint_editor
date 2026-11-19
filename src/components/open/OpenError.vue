@@ -4,8 +4,8 @@
             <circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>
         </svg>
         <div>
-            <b>{{ t(`error_${error.kind}_title`, error.params) }}</b><br>
-            {{ t(`error_${error.kind}_hint`, error.params) }}
+            <b>{{ t(`error_${error.kind}_title`, error.params) }}</b>
+            <template v-if="te(`error_${error.kind}_hint`)"><br>{{ t(`error_${error.kind}_hint`, error.params) }}</template>
         </div>
     </div>
 </template>
@@ -15,7 +15,7 @@ import { useI18n } from 'vue-i18n';
 import type { ParseErrorInfo } from '@/open/errorMap';
 
 defineProps<{ error: ParseErrorInfo }>();
-const { t } = useI18n();
+const { t, te } = useI18n();
 </script>
 
 <style lang="scss" scoped>
@@ -46,7 +46,9 @@ const { t } = useI18n();
         "error_newer_title": "这份蓝图来自游戏 {version}，比当前支持的 {supported} 更新。",
         "error_newer_hint": "请等待编辑器更新，或在游戏里用已支持的版本重新导出。",
         "error_unknown_title": "这段代码无法解析。",
-        "error_unknown_hint": "请确认复制的是完整的蓝图代码。"
+        "error_unknown_hint": "请确认复制的是完整的蓝图代码。",
+        "error_dsp2bNotFound_title": "dsp2b 上找不到这个蓝图，可能已被删除。",
+        "error_dsp2bUnreachable_title": "暂时连不上 dsp2b，请稍后再试，或直接粘贴蓝图代码。"
     },
     en: {
         "error_notBlueprint_title": "This is not a blueprint code.",
@@ -58,7 +60,9 @@ const { t } = useI18n();
         "error_newer_title": "This blueprint is from game {version}, newer than the supported {supported}.",
         "error_newer_hint": "Wait for the editor to be updated, or export it again from a supported game version.",
         "error_unknown_title": "This code cannot be read.",
-        "error_unknown_hint": "Make sure you copied the complete blueprint code."
+        "error_unknown_hint": "Make sure you copied the complete blueprint code.",
+        "error_dsp2bNotFound_title": "This blueprint was not found on dsp2b; it may have been deleted.",
+        "error_dsp2bUnreachable_title": "Can't reach dsp2b right now. Try again later or paste the blueprint code."
     },
 }
 </i18n>

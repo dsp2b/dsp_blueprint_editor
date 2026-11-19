@@ -4,7 +4,7 @@
             <button type="button" class="sheet-handle" :aria-label="t('展开或收起')"
                     :aria-expanded="!sheetCollapsed" @click="collapsed = !collapsed"></button>
             <SidebarHeader :header="data.header" :building-count="data.buildings.length"
-                           :disabled="disabled" :copy="copy"
+                           :disabled="disabled" :copy="copy" :dsp2b-id="dsp2bId"
                            @save="emit('save')" @switch="emit('switch')"
                            @settings-open="collapsed = false" />
             <div v-if="$slots.notice" class="notice"><slot name="notice"></slot></div>
@@ -68,6 +68,7 @@ const props = defineProps<{
     getCode: () => string,
     copy: () => Promise<boolean>,
     disabled?: boolean,
+    dsp2bId?: string | null,
 }>();
 const emit = defineEmits<{
     (e: 'save'): void,

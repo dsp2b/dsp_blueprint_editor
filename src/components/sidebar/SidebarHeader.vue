@@ -20,6 +20,7 @@
             <span aria-live="polite">{{ copied ? t('已复制') : t('复制蓝图代码') }}</span>
         </button>
         <button type="button" class="btn" :disabled="disabled" @click="emit('save')">{{ t('保存为文件') }}</button>
+        <a v-if="dsp2bId" class="btn" :href="backLink(dsp2bId, locale)" target="_blank" rel="noopener">{{ t('在 dsp2b 查看') }}</a>
         <button type="button" class="btn" :disabled="disabled" :title="t('换一个蓝图')" @click="emit('switch')">{{ t('换蓝图') }}</button>
     </div>
 </template>
@@ -28,6 +29,7 @@
 import { computed, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BlueprintData } from '@/blueprint/parser';
+import { backLink } from '@/open/dsp2bSource';
 import BlueprintIcon from '../BlueprintIcon.vue';
 import SettingsPopover from './SettingsPopover.vue';
 
@@ -40,6 +42,8 @@ const props = defineProps<{
     disabled?: boolean,
     /** 复制蓝图代码，成功返回 true */
     copy: () => Promise<boolean>,
+    /** 蓝图来自 dsp2b 时的 id，用于回链 */
+    dsp2bId?: string | null,
 }>();
 const emit = defineEmits<{
     (e: 'save'): void,
@@ -47,7 +51,7 @@ const emit = defineEmits<{
     (e: 'settingsOpen'): void,
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const createdAt = computed(() => {
@@ -175,7 +179,8 @@ onUnmounted(() => clearTimeout(timer));
         "已复制": "已复制",
         "保存为文件": "保存为文件",
         "换蓝图": "换蓝图",
-        "换一个蓝图": "换一个蓝图"
+        "换一个蓝图": "换一个蓝图",
+        "在 dsp2b 查看": "在 dsp2b 查看"
     },
     "en": {
         "蓝图缩略图": "Blueprint thumbnail",
@@ -187,7 +192,8 @@ onUnmounted(() => clearTimeout(timer));
         "已复制": "Copied",
         "保存为文件": "Save as file",
         "换蓝图": "Switch",
-        "换一个蓝图": "Switch blueprint"
+        "换一个蓝图": "Switch blueprint",
+        "在 dsp2b 查看": "View on dsp2b"
     }
 }
 </i18n>
