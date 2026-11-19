@@ -24,10 +24,18 @@ describe('mapParseError', () => {
         expect(mapParseError('incorrect header check', fixture, SUPPORTED).kind).toBe('truncated');
         expect(mapParseError(Error('参数解析错误：数据段太短'), fixture, SUPPORTED).kind).toBe('truncated');
     });
-    it('maps a truncated gzip payload with a valid checksum (pako returns undefined) to truncated', () => {
+    const withChecksum = (body: string) => body + '"' + Buffer.from(digest(Uint8Array.from(Buffer.from(body, 'latin1')).buffer)).toString('hex').toUpperCase();
+    it('maps a truncated gzip payload with a valid checksum to truncated', () => {
         const q = fixture.indexOf('"');
-        const body = fixture.substring(0, q + 1) + fixture.substring(q + 1, q + 41);
-        const code = body + '"' + Buffer.from(digest(Uint8Array.from(Buffer.from(body, 'latin1')).buffer)).toString('hex').toUpperCase();
+        const code = withChecksum(fixture.substring(0, q + 1) + fixture.substring(q + 1, q + 41));
+        expect(mapParseError(caught(code), code, SUPPORTED).kind).toBe('truncated');
+    });
+    it('maps a corrupt gzip payload with a valid checksum to truncated', () => {
+        const q = fixture.indexOf('"');
+        const gz = Buffer.from(fixture.substring(q + 1, fixture.lastIndexOf('"')), 'base64');
+        gz[gz.length >> 1] ^= 0xff;
+        gz[gz.length - 8] ^= 0xff; // 同时破坏 CRC32，确保 pako 报错
+        const code = withChecksum(fixture.substring(0, q + 1) + gz.toString('base64'));
         expect(mapParseError(caught(code), code, SUPPORTED).kind).toBe('truncated');
     });
     it('maps to newer-than-supported when the header version is newer, carrying both versions', () => {

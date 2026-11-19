@@ -55,16 +55,17 @@ describe('createWorkerParser', () => {
         expect(progress.length).toBeGreaterThan(0);
         expect(w.terminated).toBe(true);
     });
-    it('rebuilds errors so mapParseError classifies them as before (RangeError, string, TypeError)', async () => {
+    it('rebuilds errors so mapParseError classifies them as before (RangeError, string, TypeError, GzipError)', async () => {
         const mk = (err: unknown) => createWorkerParser({
             create: () => fakeWorker((_c, reply) => reply({ type: 'error', error: serialize(err) })),
             fallback: () => { throw new Error('no'); },
         });
         const kinds: string[] = [];
-        for (const err of [new RangeError('Invalid DataView length'), 'incorrect header check', new TypeError('x'), new Error('Invalid start')]) {
+        const gzip = Object.assign(new Error('Gzip decode failed: buffer error'), { name: 'GzipError' });
+        for (const err of [new RangeError('Invalid DataView length'), 'incorrect header check', new TypeError('x'), gzip, new Error('Invalid start')]) {
             try { await mk(err)(fixture, {}); } catch (e) { kinds.push(mapParseError(e, fixture, '0.10.35').kind); }
         }
-        expect(kinds).toEqual(['truncated', 'truncated', 'truncated', 'notBlueprint']);
+        expect(kinds).toEqual(['truncated', 'truncated', 'truncated', 'truncated', 'notBlueprint']);
     });
     it('falls back to the main thread when no Worker can be created', async () => {
         const parse = createWorkerParser({ create: () => null, fallback: (c, o) => fromStr(c, o) });
